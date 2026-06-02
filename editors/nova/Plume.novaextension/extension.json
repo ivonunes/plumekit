@@ -1,0 +1,48 @@
+{
+  "identifier": "uk.ivonunes.plume",
+  "name": "Plume",
+  "organization": "Ivo Nunes",
+  "version": "1.0.0",
+  "description": "Language support for Plume templates.",
+  "icon": "Images/extension.png",
+  "categories": [
+    "languages",
+    "completions",
+    "formatters",
+    "issues"
+  ],
+  "bugs": "https://github.com/ivonunes/plume/issues",
+  "repository": "https://github.com/ivonunes/plume",
+  "license": "MIT",
+  "min_runtime": "10.0",
+  "main": "main.js",
+  "activationEvents": [
+    "onLanguage:plume",
+    "onCommand:plume.restartLanguageServer",
+    "onCommand:plume.checkTheme"
+  ],
+  "entitlements": {
+    "process": true,
+    "filesystem": "readonly"
+  },
+  "config": {
+    "plume.toolPath": {
+      "title": "Plume Tool Path",
+      "type": "string",
+      "default": "",
+      "description": "Path to the plume CLI or inkstead-writer launcher. Leave empty to use the workspace Inkstead Writer launcher, then plume on PATH."
+    }
+  },
+  "commands": {
+    "extensions": [
+      {
+        "title": "Restart Language Server",
+        "command": "plume.restartLanguageServer"
+      },
+      {
+        "title": "Check Templates",
+        "command": "plume.checkTheme"
+      }
+    ]
+  }
+}

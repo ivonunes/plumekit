@@ -1,0 +1,86 @@
+[
+  {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "comment",
+          "named": true
+        },
+        {
+          "type": "component",
+          "named": true
+        },
+        {
+          "type": "control_word",
+          "named": true
+        },
+        {
+          "type": "directive",
+          "named": true
+        },
+        {
+          "type": "html_tag",
+          "named": true
+        },
+        {
+          "type": "interpolation",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "comment",
+    "named": true
+  },
+  {
+    "type": "component",
+    "named": true
+  },
+  {
+    "type": "control_word",
+    "named": true
+  },
+  {
+    "type": "directive",
+    "named": true
+  },
+  {
+    "type": "html_tag",
+    "named": true
+  },
+  {
+    "type": "interpolation",
+    "named": true
+  },
+  {
+    "type": "punctuation",
+    "named": true
+  },
+  {
+    "type": "string",
+    "named": true
+  },
+  {
+    "type": "text",
+    "named": true
+  }
+]

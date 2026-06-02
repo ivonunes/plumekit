@@ -1,0 +1,83 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    container:
+      image: swift:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test
+        run: swift test
+
+      - name: Release build
+        run: swift build -c release --static-swift-stdlib
+
+      - name: Smoke test CLI
+        run: |
+          .build/release/plume version
+          printf '@let title = "Hello"\n<h1>{ title }</h1>\n' > sample.plume
+          .build/release/plume check sample.plume
+          .build/release/plume format --stdin < sample.plume > formatted.plume
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+
+      - name: Check editor scripts
+        run: |
+          node -e 'JSON.parse(require("fs").readFileSync("editors/vscode/package.json", "utf8"))'
+          node -e 'JSON.parse(require("fs").readFileSync("editors/vscode/snippets/plume.json", "utf8"))'
+          node -e 'JSON.parse(require("fs").readFileSync("editors/vscode/syntaxes/plume.tmLanguage.json", "utf8"))'
+          node -e 'JSON.parse(require("fs").readFileSync("editors/nova/Plume.novaextension/extension.json", "utf8"))'
+          node -c editors/vscode/extension.js
+          node -c editors/nova/Plume.novaextension/Scripts/main.js
+          sh -n support/build-nova-extension.sh
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test
+        run: swift test
+
+      - name: Release build
+        run: swift build -c release
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+
+      - name: Install Nova
+        run: |
+          curl -L https://download.panic.com/nova/Nova-Latest.zip -o "$RUNNER_TEMP/Nova.zip"
+          mkdir -p "$RUNNER_TEMP/nova"
+          ditto -x -k "$RUNNER_TEMP/Nova.zip" "$RUNNER_TEMP/nova"
+          test -d "$RUNNER_TEMP/nova/Nova.app"
+          echo "NOVA_APP_PATH=$RUNNER_TEMP/nova/Nova.app" >> "$GITHUB_ENV"
+
+      - name: Build Nova extension
+        run: support/build-nova-extension.sh
+
+      - name: Smoke test CLI
+        run: |
+          .build/release/plume version
+          printf '@let title = "Hello"\n<h1>{ title }</h1>\n' > sample.plume
+          .build/release/plume check sample.plume
+          .build/release/plume format --stdin < sample.plume > formatted.plume

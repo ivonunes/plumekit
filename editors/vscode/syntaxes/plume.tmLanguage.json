@@ -1,0 +1,113 @@
+{
+  "name": "Plume",
+  "scopeName": "text.html.plume",
+  "fileTypes": ["plume"],
+  "patterns": [
+    { "include": "#plume-comments" },
+    { "include": "#plume-directives" },
+    { "include": "#plume-components" },
+    { "include": "#plume-expressions" },
+    { "include": "#html" }
+  ],
+  "repository": {
+    "plume-comments": {
+      "patterns": [
+        {
+          "name": "comment.block.plume",
+          "begin": "@comment\\s*\\{",
+          "end": "\\}"
+        }
+      ]
+    },
+    "plume-directives": {
+      "patterns": [
+        {
+          "name": "keyword.control.directive.plume",
+          "match": "@(?:if|for|component|slot|content|style|script|navigation|image|state|let|comment)\\b|\\belse\\b"
+        },
+        {
+          "name": "storage.type.plume",
+          "match": "\\b(?:true|false|null|in|scoped)\\b"
+        }
+      ]
+    },
+    "plume-components": {
+      "patterns": [
+        {
+          "name": "entity.name.function.component.plume",
+          "match": "@[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "plume-expressions": {
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.plume",
+          "begin": "\\{(?=!?[A-Za-z_]|\\d|[\"']|-\\d)",
+          "end": "\\}",
+          "patterns": [
+            { "include": "#strings" },
+            {
+              "name": "keyword.operator.pipe.plume",
+              "match": "\\|"
+            },
+            {
+              "name": "support.function.filter.plume",
+              "match": "\\b(?:raw|default|date|json|urlEncode|newlineToBR|truncateWords|sort|where|map|join|plus|minus|times|dividedBy|modulo|abs|ceil|floor|slice|unique|reverse)\\b"
+            },
+            {
+              "name": "variable.other.plume",
+              "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*\\b"
+            },
+            {
+              "name": "constant.numeric.plume",
+              "match": "\\b\\d+(?:\\.\\d+)?\\b"
+            },
+            {
+              "name": "keyword.operator.plume",
+              "match": "==|!=|<=|>=|&&|\\|\\||[!+\\-*/%?:<>]"
+            }
+          ]
+        }
+      ]
+    },
+    "html": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.html",
+          "match": "</?[-A-Za-z0-9:]+"
+        },
+        {
+          "name": "entity.other.attribute-name.html",
+          "match": "\\b[-A-Za-z0-9:]+[?:+]?="
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.plume",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.plume",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.plume",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.plume",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

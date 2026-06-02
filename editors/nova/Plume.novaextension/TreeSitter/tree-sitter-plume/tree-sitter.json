@@ -1,0 +1,36 @@
+{
+  "grammars": [
+    {
+      "name": "plume",
+      "camelcase": "Plume",
+      "scope": "source.plume",
+      "file-types": [
+        "plume"
+      ],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "license": "MIT",
+    "description": "Plume template grammar for Nova syntax highlighting",
+    "authors": [
+      {
+        "name": "Ivo Nunes"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/ivonunes/plume"
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "java": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}

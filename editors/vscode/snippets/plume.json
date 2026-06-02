@@ -1,0 +1,168 @@
+{
+  "Component": {
+    "prefix": [
+      "component",
+      "@component"
+    ],
+    "body": [
+      "@component ${1:Name}(${2:parameter}) {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Define a Plume component"
+  },
+  "Loop": {
+    "prefix": [
+      "for",
+      "@for"
+    ],
+    "body": [
+      "@for ${1:item} in ${2:items} {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Loop over a collection"
+  },
+  "Conditional": {
+    "prefix": [
+      "if",
+      "@if"
+    ],
+    "body": [
+      "@if ${1:condition} {",
+      "  ${2}",
+      "} else {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Render content conditionally"
+  },
+  "Else If": {
+    "prefix": [
+      "elseif",
+      "else if"
+    ],
+    "body": [
+      "} else if ${1:condition} {",
+      "  ${0}"
+    ],
+    "description": "Continue a conditional branch"
+  },
+  "State": {
+    "prefix": [
+      "state",
+      "@state"
+    ],
+    "body": "@state ${1:name} = ${2:false}",
+    "description": "Define interactive state"
+  },
+  "Action": {
+    "prefix": "action",
+    "body": "on:${1:click}=\"{${2:state}.toggle()}\"",
+    "description": "Add a declarative action"
+  },
+  "Scoped Style": {
+    "prefix": [
+      "style",
+      "@style"
+    ],
+    "body": [
+      "@style(scoped) {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Add scoped CSS"
+  },
+  "Style File": {
+    "prefix": [
+      "stylefile",
+      "@style(file:)"
+    ],
+    "body": "@style(file: \"${1:styles/site.css}\")",
+    "description": "Attach a CSS file"
+  },
+  "Plume Script": {
+    "prefix": [
+      "script",
+      "@script"
+    ],
+    "body": [
+      "@script {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Add Plume client script"
+  },
+  "Scoped Script": {
+    "prefix": [
+      "scopedscript",
+      "@script(scoped:)"
+    ],
+    "body": [
+      "@script(scoped: true) {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Add a scoped Plume client script"
+  },
+  "Script File": {
+    "prefix": [
+      "scriptfile",
+      "@script(file:)"
+    ],
+    "body": "@script(file: \"${1:scripts/site.plume}\")",
+    "description": "Attach a script file"
+  },
+  "JavaScript Escape Hatch": {
+    "prefix": [
+      "javascript",
+      "@script(language:)"
+    ],
+    "body": [
+      "@script(language: \"javascript\") {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Attach raw JavaScript"
+  },
+  "Navigation": {
+    "prefix": [
+      "navigation",
+      "@navigation"
+    ],
+    "body": [
+      "@navigation(root: \"${1:body}\", viewTransitions: true, scroll: \"top\") {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Enable enhanced same-origin navigation"
+  },
+  "Slot": {
+    "prefix": [
+      "slot",
+      "@slot"
+    ],
+    "body": "@slot${1:(\"name\")}",
+    "description": "Render component slot content"
+  },
+  "Named Content": {
+    "prefix": [
+      "content",
+      "@content"
+    ],
+    "body": [
+      "@content(${1:header}) {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Provide named component content"
+  },
+  "Image": {
+    "prefix": [
+      "image",
+      "@image"
+    ],
+    "body": "@image(\"${1:path.jpg}\", alt: \"${2:Description}\")",
+    "description": "Render an optimized image"
+  }
+}

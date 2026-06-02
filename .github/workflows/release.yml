@@ -1,0 +1,265 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-tests:
+    name: Linux tests
+    runs-on: ubuntu-latest
+    container:
+      image: swift:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test
+        run: swift test
+
+  macos-tests:
+    name: macOS tests
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test
+        run: swift test
+
+  installer:
+    name: Installer
+    needs:
+      - linux-tests
+      - macos-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Smoke test installer
+        run: |
+          test -x support/install.sh
+          sh -n support/install.sh
+          support/install.sh --help >/dev/null
+
+  linux:
+    name: Linux binary (${{ matrix.arch }})
+    needs:
+      - linux-tests
+      - macos-tests
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: swift:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check tag matches Plume version
+        run: |
+          VERSION="$(sed -n 's/.*current = "\(.*\)".*/\1/p' Sources/Plume/PlumeVersion.swift)"
+          if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Plume version $VERSION"
+            exit 1
+          fi
+
+      - name: Test
+        run: swift test
+
+      - name: Build
+        run: swift build -c release --static-swift-stdlib
+
+      - name: Package
+        run: |
+          mkdir -p artifact
+          cp .build/release/plume artifact/plume
+          cp LICENSE.txt artifact/LICENSE.txt
+          tar -C artifact -czf plume-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz plume LICENSE.txt
+
+      - name: Smoke test archive
+        run: |
+          mkdir -p smoke
+          tar -xzf plume-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz -C smoke
+          test -x smoke/plume
+          test -f smoke/LICENSE.txt
+          smoke/plume version
+          printf '@let title = "Hello"\n<h1>{ title }</h1>\n' > smoke/sample.plume
+          smoke/plume check smoke/sample.plume
+          smoke/plume format --stdin < smoke/sample.plume > smoke/formatted.plume
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}-binary
+          path: plume-*-linux-${{ matrix.arch }}.tar.gz
+
+  macos:
+    name: macOS binary (${{ matrix.arch }})
+    needs:
+      - linux-tests
+      - macos-tests
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check tag matches Plume version
+        run: |
+          VERSION="$(sed -n 's/.*current = "\(.*\)".*/\1/p' Sources/Plume/PlumeVersion.swift)"
+          if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Plume version $VERSION"
+            exit 1
+          fi
+
+      - name: Test
+        run: swift test
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Package
+        run: |
+          mkdir -p artifact
+          cp .build/release/plume artifact/plume
+          cp LICENSE.txt artifact/LICENSE.txt
+          tar -C artifact -czf plume-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.tar.gz plume LICENSE.txt
+
+      - name: Smoke test archive
+        run: |
+          mkdir -p smoke
+          tar -xzf plume-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.tar.gz -C smoke
+          test -x smoke/plume
+          test -f smoke/LICENSE.txt
+          smoke/plume version
+          printf '@let title = "Hello"\n<h1>{ title }</h1>\n' > smoke/sample.plume
+          smoke/plume check smoke/sample.plume
+          smoke/plume format --stdin < smoke/sample.plume > smoke/formatted.plume
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.arch }}-binary
+          path: plume-*-macos-${{ matrix.arch }}.tar.gz
+
+  editors:
+    name: Editor extensions
+    needs:
+      - linux-tests
+      - macos-tests
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+
+      - name: Install Nova
+        run: |
+          curl -L https://download.panic.com/nova/Nova-Latest.zip -o "$RUNNER_TEMP/Nova.zip"
+          mkdir -p "$RUNNER_TEMP/nova"
+          ditto -x -k "$RUNNER_TEMP/Nova.zip" "$RUNNER_TEMP/nova"
+          test -d "$RUNNER_TEMP/nova/Nova.app"
+          echo "NOVA_APP_PATH=$RUNNER_TEMP/nova/Nova.app" >> "$GITHUB_ENV"
+
+      - name: Check extension versions match tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VSCODE_VERSION="$(node -p 'require("./editors/vscode/package.json").version')"
+          NOVA_VERSION="$(node -p 'require("./editors/nova/Plume.novaextension/extension.json").version')"
+          if [ "$VSCODE_VERSION" != "$VERSION" ]; then
+            echo "VS Code extension version $VSCODE_VERSION does not match $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if [ "$NOVA_VERSION" != "$VERSION" ]; then
+            echo "Nova extension version $NOVA_VERSION does not match $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - name: Copy license into editor packages
+        run: |
+          cp LICENSE.txt editors/vscode/LICENSE.txt
+          cp LICENSE.txt editors/nova/Plume.novaextension/LICENSE.txt
+
+      - name: Package VS Code extension
+        run: |
+          npm install --prefix editors/vscode
+          npm run --prefix editors/vscode package -- --out ../../plume-vscode-${GITHUB_REF_NAME}.vsix
+
+      - name: Build Nova extension
+        run: support/build-nova-extension.sh
+
+      - name: Package Nova extension
+        run: |
+          python3 - <<'PY'
+          import os
+          import zipfile
+
+          source = "editors/nova/Plume.novaextension"
+          output = f"plume-nova-{os.environ['GITHUB_REF_NAME']}.zip"
+          with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+              for root, _, files in os.walk(source):
+                  for name in files:
+                      path = os.path.join(root, name)
+                      archive.write(path, os.path.relpath(path, "editors/nova"))
+          PY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: editor-extensions
+          path: |
+            plume-vscode-*.vsix
+            plume-nova-*.zip
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - installer
+      - linux
+      - macos
+      - editors
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz *.vsix *.zip > "plume-${GITHUB_REF_NAME}-SHA256SUMS"
+          sha256sum -c "plume-${GITHUB_REF_NAME}-SHA256SUMS"
+
+      - name: Create release
+        run: gh release create "$GITHUB_REF_NAME" artifacts/*.tar.gz artifacts/*.vsix artifacts/*.zip artifacts/*-SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

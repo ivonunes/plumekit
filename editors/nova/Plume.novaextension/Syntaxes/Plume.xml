@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<syntax name="plume" xmlns="https://www.nova.app/syntax">
+    <meta>
+        <name>Plume</name>
+        <type>markup</type>
+        <preferred-file-extension>plume</preferred-file-extension>
+    </meta>
+
+    <detectors>
+        <extension priority="1.0">plume</extension>
+    </detectors>
+
+    <tree-sitter>
+        <highlights />
+    </tree-sitter>
+</syntax>

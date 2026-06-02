@@ -1,0 +1,189 @@
+# Interactivity
+
+Plume is not trying to turn every website into an app. Its interactive layer is for small, local behaviour: disclosures, menus, filters, sliders, page transitions, and progressive enhancement.
+
+When a template uses state, event bindings, browser actions, or navigation hooks, Plume marks the render result as requiring the runtime. The host application decides where to emit that runtime script.
+
+## Choosing The Right Tool
+
+Use the smallest layer that describes the behaviour:
+
+- Use HTML and CSS first.
+- Use `@state` and `on:*` for local UI state.
+- Use browser actions such as `page.scrollToTop` or `page.measure` for common page behaviour.
+- Use `@script` when an interaction needs several steps or shared event handling.
+- Use `@script(language: "javascript")` only when you need browser APIs outside Plume's client script language.
+
+## State
+
+Declare local state with `@state`:
+
+```plume
+@state expanded = false
+
+<button on:click="{expanded.toggle()}" aria-expanded="{expanded}">
+  {expanded ? "Hide" : "Show"} details
+</button>
+
+<section hidden?="{!expanded}" class:open="{expanded}">
+  Details
+</section>
+```
+
+State can be rendered into:
+
+- Text content
+- Attributes
+- Conditional classes
+- Optional attributes
+- Inline style properties
+
+State is local to the rendered page. It is not a persistence layer and it is not shared with the server.
+
+## Actions
+
+State actions are intentionally small:
+
+```plume
+on:click="{expanded.toggle()}"
+on:click="{count.increment()}"
+on:click="{count.decrement()}"
+on:input="{query.set(event.value)}"
+```
+
+Supported state actions:
+
+- `name.toggle()`
+- `name.set(value)`
+- `name.increment()`
+- `name.decrement()`
+
+For form controls, `event.value` is available:
+
+```plume
+@state query = ""
+
+<input value="{query}" on:input="{query.set(event.value)}">
+<p hidden?="{query == ''}">Searching for {query}</p>
+```
+
+## Browser Actions
+
+Use `page` for common browser actions:
+
+```plume
+<button on:click="{page.scrollToTop(smooth: true)}">Top</button>
+```
+
+Supported page actions:
+
+- `page.scrollToTop(smooth: true)`
+- `page.scrollTo(selector: "#main", smooth: true)`
+- `page.addClass("is-open")`
+- `page.removeClass("is-open")`
+- `page.toggleClass("nav-open")`
+- `page.measure(selector, into: ["x", "width"])`
+
+Class actions target the document element by default. Pass `target: "body"` or another selector to target a specific element.
+
+## Measuring Elements
+
+Use `page.measure` when an interaction needs live element geometry but CSS should still do the animation:
+
+```plume
+@state sliderX = 0
+@state sliderWidth = 0
+
+<nav on:resize="{page.measure('.nav-link[aria-current=page]', into: ['sliderX', 'sliderWidth'])}">
+  <a
+    class="nav-link"
+    href="/projects/"
+    on:pointerenter="{page.measure(event.target, into: ['sliderX', 'sliderWidth'], round: true)}"
+  >
+    Projects
+  </a>
+
+  <span
+    class="nav-slider"
+    style:--slider-x="{sliderX}px"
+    style:--slider-width="{sliderWidth}px"
+  ></span>
+</nav>
+```
+
+By default, two `into` values receive the measured element's `x` and `width`. Pass `properties: ['y', 'height']` when you need different measurements.
+
+Available properties include `x`, `y`, `width`, `height`, `top`, `left`, `right`, `bottom`, `viewportX`, `viewportY`, `centerX`, and `centerY`.
+
+## Viewport Events
+
+`on:visible` fires when an element enters the viewport:
+
+```plume
+@state introSeen = false
+
+<section on:visible="{introSeen.set(true)}" class:seen="{introSeen}">
+  ...
+</section>
+```
+
+`on:resize` and `on:scroll` run on animation frames and can update state from page geometry.
+
+## Client Scripts
+
+Use `@script` when an interaction needs more than a single action:
+
+```plume
+@script {
+  let menu = page.query("#menu")
+
+  on ".menu-toggle".click {
+    event.preventDefault()
+    menu.toggleClass("is-open")
+  }
+
+  on page.scroll {
+    page.toggleClass("is-scrolled", when: page.scrollY > 24)
+  }
+}
+```
+
+Client scripts support `let`, `var`, `if`, `else`, `for item in items`, `on target.event` blocks, query helpers, class helpers, text and attribute helpers, and scroll helpers. Use `@script(language: "javascript")` when you need raw browser APIs.
+
+Keep scripts close to the markup they enhance. If the script belongs to one component instance, use `@script(scoped)`. If it coordinates the whole page, put it in a page or layout template.
+
+## Page Navigation
+
+Use `@navigation` when same-origin links should fetch and swap page content instead of doing a full browser reload:
+
+```plume
+@navigation(root: "main", viewTransitions: true, scroll: "top") {
+  on:beforeSwap {
+    page.addClass("is-leaving")
+  }
+
+  on:afterSwap {
+    page.removeClass("is-leaving")
+  }
+}
+```
+
+Put it in a layout template when the whole site should use it.
+
+Available hooks:
+
+- `on:start`
+- `on:beforeSwap`
+- `on:afterSwap`
+- `on:complete`
+- `on:error`
+
+The runtime intercepts same-origin links, fetches the next page, swaps the configured root element, updates the document title, loads missing Plume styles and module scripts, uses View Transitions where available, and falls back to a normal page load on errors.
+
+Use `data-plume-navigation="false"` on a link to opt out.
+
+## Runtime Checklist
+
+When embedding Plume, include the runtime only when `renderResult.requiresRuntime` is true. Pages that only use static templates, components, styles, scripts, assets, or images do not need the runtime unless they also use state, event bindings, browser actions, or navigation.
+
+Navigation works best when the configured root exists on every page that participates. Links to downloads, external sites, anchors, feeds, and custom protocols should keep their normal browser behaviour.

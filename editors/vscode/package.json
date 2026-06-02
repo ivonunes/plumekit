@@ -1,0 +1,94 @@
+{
+  "name": "plume",
+  "displayName": "Plume",
+  "description": "Language support for Plume templates.",
+  "version": "1.0.0",
+  "publisher": "ivonunes",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ivonunes/plume"
+  },
+  "bugs": {
+    "url": "https://github.com/ivonunes/plume/issues"
+  },
+  "homepage": "https://inkstead.dev/plume/",
+  "keywords": [
+    "plume",
+    "templates",
+    "html",
+    "static-site"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:plume",
+    "onCommand:plume.restartLanguageServer",
+    "onCommand:plume.checkTheme"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "plume.restartLanguageServer",
+        "title": "Plume: Restart Language Server"
+      },
+      {
+        "command": "plume.checkTheme",
+        "title": "Plume: Check Templates"
+      }
+    ],
+    "configuration": {
+      "title": "Plume",
+      "properties": {
+        "plume.toolPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the plume CLI or inkstead-writer launcher. Leave empty to prefer ./inkstead-writer in the workspace, then plume on PATH."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "plume",
+        "aliases": [
+          "Plume"
+        ],
+        "extensions": [
+          ".plume"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "plume",
+        "scopeName": "text.html.plume",
+        "path": "./syntaxes/plume.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "plume",
+        "path": "./snippets/plume.json"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^2.15.0",
+    "@types/vscode": "^1.85.0"
+  },
+  "scripts": {
+    "check": "node -c extension.js",
+    "package": "vsce package"
+  }
+}
