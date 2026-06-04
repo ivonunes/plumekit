@@ -17,6 +17,7 @@ Options:
   --version VERSION   Install a specific release tag or version, for example v1.0.0.
   --prefix PREFIX     Install under PREFIX/bin. Defaults to /usr/local.
   --bin-dir DIR       Install directly into DIR, overriding --prefix.
+  --dir DIR           Alias for --bin-dir.
   --repo OWNER/REPO   Download from another GitHub repository.
   -h, --help          Show this help.
 USAGE
@@ -34,9 +35,10 @@ while [ "$#" -gt 0 ]; do
             [ -n "$prefix" ] || { echo "Missing value for --prefix" >&2; exit 1; }
             shift 2
             ;;
-        --bin-dir)
+        --bin-dir|--dir)
+            option="$1"
             bin_dir="${2:-}"
-            [ -n "$bin_dir" ] || { echo "Missing value for --bin-dir" >&2; exit 1; }
+            [ -n "$bin_dir" ] || { echo "Missing value for $option" >&2; exit 1; }
             shift 2
             ;;
         --repo)
@@ -83,6 +85,37 @@ download_stdout() {
         echo "Plume install requires curl or wget." >&2
         exit 1
     fi
+}
+
+install_file() {
+    source="$1"
+    target="$2"
+    target_dir="$(dirname -- "$target")"
+
+    if mkdir -p "$target_dir" 2>/dev/null && [ -w "$target_dir" ]; then
+        if command_exists install; then
+            install -m 0755 "$source" "$target"
+        else
+            cp "$source" "$target"
+            chmod 0755 "$target"
+        fi
+        return 0
+    fi
+
+    if command_exists sudo; then
+        sudo mkdir -p "$target_dir"
+        if command_exists install; then
+            sudo install -m 0755 "$source" "$target"
+        else
+            sudo cp "$source" "$target"
+            sudo chmod 0755 "$target"
+        fi
+        return 0
+    fi
+
+    echo "Cannot write to $target_dir." >&2
+    echo "Run again with --bin-dir pointing at a writable directory, or install with sudo." >&2
+    exit 1
 }
 
 detect_platform() {
@@ -152,14 +185,7 @@ else
 fi
 
 tar -xzf "$tmp/$archive" -C "$tmp"
-mkdir -p "$bin_dir"
-
-if command_exists install; then
-    install -m 0755 "$tmp/plume" "$bin_dir/plume"
-else
-    cp "$tmp/plume" "$bin_dir/plume"
-    chmod 0755 "$bin_dir/plume"
-fi
+install_file "$tmp/plume" "$bin_dir/plume"
 
 echo "Installed Plume to $bin_dir/plume"
 "$bin_dir/plume" version
