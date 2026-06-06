@@ -1,10 +1,10 @@
-# Styles, Scripts, and Assets
+# Resources
 
 Plume can collect page resources while rendering. A host application can then emit those resources as real CSS, JavaScript, and image files instead of forcing everything inline.
 
-The important idea is locality: write the resource next to the markup that needs it, and let the host decide how to fingerprint, inject, optimize, or copy it.
+The important idea is locality: write the resource next to the markup that needs it, and let the host decide how to fingerprint, inject, optimise, or copy it.
 
-## Resource Lifecycle
+## Lifecycle
 
 When a template renders, Plume records resource declarations in the render result. It does not assume where those files should live in the final site.
 
@@ -17,7 +17,7 @@ A host can then:
 - Generate responsive images.
 - Inject links and scripts into the final document.
 
-Use `renderResult()` when embedding Plume and you need access to those collected resources.
+When embedding Plume yourself, [Embedding](../embedding/index.md) explains how to emit collected resources.
 
 ## Styles
 
@@ -102,7 +102,7 @@ JavaScript files are treated as raw JavaScript automatically:
 @script(file: "scripts/site.js")
 ```
 
-## Scoped Scripts
+## Scoped
 
 Scoped scripts belong to a rendered fragment. Inside the script, `root` is the fragment's top-level element:
 

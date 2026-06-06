@@ -1,16 +1,28 @@
 # Getting Started
 
+Plume is a templating language for building expressive websites. It keeps markup, components, styles, assets, and small interactions close together, so the page you write stays close to the page you ship.
+
 A Plume file is mostly HTML. Plume adds expressions, directives, components, and resource declarations where plain HTML needs help.
 
 This guide shows the quickest path from a blank template to a checked and formatted file.
 
-## Choose Your Entry Point
+## What Plume Gives You
+
+- Escaped output by default.
+- Clear control flow with `@if`, `else if`, `else`, `@for`, and `@let`.
+- Components with named arguments, defaults, slots, and named slot content.
+- Attribute helpers for conditional classes, optional attributes, and style bindings.
+- Co-located `@style`, `@script`, `asset()`, and `@image` usage.
+- Small interactive behaviours through state, event bindings, browser actions, and page navigation.
+- Formatting, checking, language server support, and editor extensions.
+
+## Choose Entry Point
 
 Use the standalone `plume` CLI when you are embedding Plume in your own project, experimenting with the language, or wiring up editor support outside Inkstead Writer.
 
 Use the site-local `./inkstead-writer` wrapper inside an Inkstead Writer site. Writer embeds the Plume version that belongs to that site, so the theme commands are the safest way to check and format Writer themes.
 
-## Install The CLI
+## Install
 
 Install with Homebrew:
 
@@ -32,7 +44,7 @@ Inkstead Writer users can use the site-local wrapper instead:
 ./inkstead-writer theme format
 ```
 
-## Write A Template
+## First Template
 
 Create `home.plume`. A first template can be normal HTML with a few expressions and directives:
 
@@ -64,84 +76,20 @@ Format it:
 plume format home.plume
 ```
 
-## The Mental Model
+## Mental Model
 
 Plume has a few core rules:
 
 - `{expression}` prints escaped output.
 - Trusted HTML must come from the host as `PlumeSafeHTML` or be explicitly marked with `| raw`.
 - Directives start with `@`, such as `@if`, `@for`, `@component`, `@style`, and `@script`.
-- Components are called with UpperCamelCase names, such as `@PostCard(post)`.
+- Components are called with PascalCase names, such as `@PostCard(post)`.
 - Styles, scripts, images, and assets are collected while rendering so the host can emit them as real site resources.
 
 The host provides the data. In the example above, `site`, `posts`, and `post.urlPath` are not global Plume objects; they come from the application rendering the template. Inkstead Writer provides those values for themes, while another Swift host can provide a completely different context.
 
 When you are unsure where something belongs, start with HTML first. Add Plume only where it removes repetition, clarifies conditional output, keeps resources close to their markup, or avoids custom JavaScript for small interactions.
 
-## Use It From Swift
+## Next
 
-Plume is also a Swift library:
-
-```swift
-import Plume
-
-let template = try PlumeTemplate("""
-<h1>{site.title}</h1>
-""")
-
-let html = try template.render([
-    "site": ["title": "My Site"]
-])
-```
-
-Output is escaped by default:
-
-```swift
-let html = try template.render([
-    "title": "<script>alert('x')</script>"
-])
-```
-
-```plume
-<h1>{title}</h1>
-```
-
-When the host has already rendered trusted HTML, pass `PlumeSafeHTML`:
-
-```swift
-let html = try template.render([
-    "content": PlumeSafeHTML("<p>Already rendered Markdown.</p>")
-])
-```
-
-```plume
-<article>{content}</article>
-```
-
-## Organise Files
-
-Plume does not require a specific directory layout. Hosts decide how templates and components are loaded.
-
-Inkstead Writer uses a layout like this:
-
-```txt
-theme/
-  layouts/
-    default.plume
-  pages/
-    home.plume
-    post.plume
-  components/
-    PostCard.plume
-  styles/
-    site.css
-  scripts/
-    site.plume
-```
-
-For a standalone Plume project, keep templates and components wherever your host application expects them. The CLI can scan a folder:
-
-```sh
-plume check theme
-plume format --check theme
-```
+Read [Syntax](../syntax/index.md) for the language reference, [Components](../components/index.md) for reusable markup, and [Embedding](../embedding/index.md) when you want to use Plume from Swift.

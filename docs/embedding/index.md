@@ -1,8 +1,8 @@
-# Embedding Plume
+# Embedding
 
 Plume is a Swift package. Host applications provide templates, context values, functions, components, and resource handling.
 
-## Render A Template
+## Render
 
 The core API is `PlumeTemplate`:
 
@@ -29,9 +29,9 @@ let template = try PlumeTemplate(
 )
 ```
 
-## Render With Resources
+## Resources
 
-Use `renderResult` when the host needs collected styles, scripts, state, images, or navigation declarations:
+Use `renderResult` when the host needs collected styles, scripts, state, or navigation declarations:
 
 ```swift
 let result = try template.renderResult(context)
@@ -69,7 +69,7 @@ Components defined inside the current template are collected automatically.
 
 ## Safe HTML
 
-Ordinary strings are escaped. Use `PlumeSafeHTML` for trusted HTML that the host has already rendered or sanitized:
+Ordinary strings are escaped. Use `PlumeSafeHTML` for trusted HTML that the host has already rendered or sanitised:
 
 ```swift
 let html = try template.render([
@@ -104,7 +104,7 @@ Templates call the function like any other expression:
 
 Use functions for host-specific behaviour such as asset resolution, URL generation, image helpers, or formatting values that should remain outside the template language.
 
-## Diagnostics And Editor Support
+## Diagnostics
 
 Use `PlumeLanguageSupport` for editor-facing tooling:
 
@@ -118,7 +118,15 @@ let diagnostics = PlumeLanguageSupport.diagnostics(
 
 The standalone language server and editor extensions use the same language support APIs.
 
-## Minimal Host Shape
+## Runtime
+
+Emit the Plume runtime only when `result.requiresRuntime` is true. Static templates, components, styles, scripts, assets, and images do not need it unless the page also uses state, event bindings, browser actions, or navigation.
+
+When `@navigation` is enabled, the runtime intercepts same-origin links, fetches the next page, swaps the configured root element, updates the document title, loads missing Plume styles and module scripts, uses View Transitions where available, and falls back to a normal page load on errors.
+
+Navigation works best when the configured root exists on every participating page. Downloads, external sites, anchors, feeds, and custom protocols should keep their normal browser behaviour.
+
+## Host Shape
 
 A small host usually needs these pieces:
 
@@ -130,7 +138,7 @@ A small host usually needs these pieces:
 
 Start with `render()` while prototyping. Move to `renderResult()` when templates begin declaring resources or interactivity.
 
-## Host Responsibilities
+## Responsibilities
 
 Plume renders templates and records resource declarations. A host application is responsible for:
 

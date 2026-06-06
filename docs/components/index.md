@@ -2,9 +2,9 @@
 
 Components keep repeated markup in one place without hiding the HTML shape of the page. Define them with `@component`, then call them by name.
 
-## Define And Call
+## Define
 
-Component names use UpperCamelCase:
+Component names use PascalCase:
 
 ```plume
 @component PostCard(post, tone = "default") {
@@ -21,7 +21,7 @@ Component names use UpperCamelCase:
 
 Arguments can be positional, named, or mixed. Named arguments are clearer once a component accepts more than one optional value.
 
-## Designing Component APIs
+## APIs
 
 Keep the first argument the thing the component renders, then make options named:
 
@@ -77,9 +77,9 @@ Slots can include fallback content:
 
 The fallback renders only when the caller does not pass trailing content.
 
-## Named Content
+## Named Slots
 
-Use named content when a component has multiple content areas:
+Use named slots when a component has multiple content areas:
 
 ```plume
 @component PageSection(title) {
@@ -111,9 +111,9 @@ Use named content when a component has multiple content areas:
 }
 ```
 
-`@content` is only valid directly inside a component call. This keeps the ownership of named content clear.
+`@content` is only valid directly inside a component call. This keeps the ownership of named slots clear.
 
-## Component Resources
+## Resources
 
 Components can carry the styles and scripts they need:
 
@@ -152,7 +152,7 @@ Components can call other components:
 
 Keep components focused. A component that owns layout, data selection, styling, and interaction all at once is harder to reuse than a component with one clear job.
 
-## Errors That Help
+## Errors
 
 Plume checks component calls against their definitions. Unknown arguments and duplicate arguments are reported as template errors:
 
@@ -162,7 +162,7 @@ Plume checks component calls against their definitions. Unknown arguments and du
 
 That makes component APIs safer to evolve than loose includes or partials.
 
-## File Loading
+## Loading
 
 Plume itself does not require a component folder. Hosts decide which component sources to provide to a template environment.
 

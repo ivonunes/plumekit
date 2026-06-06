@@ -54,4 +54,11 @@ The VS Code and Nova extensions are packaged as release artifacts. They prefer a
 
 ## Documentation
 
-The docs are published under `inkstead.dev/plume`.
+The docs are published under `inkstead.dev/plume` and live in `docs/`. They are organised around Start, Syntax, Components, Customise, Embedding, and Tooling.
+
+- [Start](docs/start/getting-started.md): install the CLI, write a first template, check it, and format it.
+- [Syntax](docs/syntax/index.md): output, expressions, conditionals, loops, filters, methods, and attributes.
+- [Components](docs/components/index.md): component APIs, defaults, slots, named slots, composition, and loading.
+- Customise: [Resources](docs/customise/resources.md) covers styles, scripts, assets, and images; [Behaviour](docs/customise/behaviour.md) covers state, actions, browser helpers, scripts, and navigation.
+- [Embedding](docs/embedding/index.md): Swift APIs, render results, resources, runtime, and host responsibilities.
+- [Tooling](docs/tooling/index.md): CLI commands, editor support, checks, CI formatting, and troubleshooting.

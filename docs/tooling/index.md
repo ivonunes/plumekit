@@ -1,23 +1,10 @@
-# CLI and Editor Tooling
+# Tooling
 
 Plume ships a small CLI for checking, formatting, and editor integration. The CLI is useful for standalone Plume users and for editor extensions.
 
 Inkstead Writer embeds Plume, so Writer sites usually run the same capabilities through `inkstead-writer theme ...`.
 
-## Install
-
-Install the standalone CLI:
-
-```sh
-brew tap ivonunes/tap
-brew install plume
-```
-
-Or use the release installer:
-
-```sh
-curl -fsSL https://install.inkstead.dev/plume | sh
-```
+If you need the standalone CLI first, see [Start](../start/getting-started.md).
 
 ## Commands
 
@@ -48,7 +35,7 @@ Run the language server:
 plume language-server
 ```
 
-## Feedback Loop
+## Feedback
 
 While writing templates, run `check` when you want diagnostics and `format` when you want the file rewritten:
 
@@ -63,20 +50,20 @@ In CI, use `format --check` so the build fails when committed templates are not 
 plume format --check theme
 ```
 
-## What Check Validates
+## Checks
 
 `plume check` validates:
 
 - Template syntax.
 - Component calls and component arguments.
-- Named content placement.
+- Named slot content placement.
 - Inline Plume client scripts.
 - Static style and script file references.
 - Static asset and image references the host can see.
 
 Inkstead Writer adds Writer-specific checks for theme paths, generated images, missing image alt text, and site context.
 
-## Inkstead Writer Commands
+## Writer
 
 Inside a Writer site, prefer the site-local wrapper:
 
@@ -89,7 +76,7 @@ Inside a Writer site, prefer the site-local wrapper:
 
 This uses the Plume version embedded in the Writer version pinned by the site.
 
-## Editor Extensions
+## Editors
 
 VS Code and Nova extensions are packaged with each Plume release.
 
@@ -104,7 +91,7 @@ They provide:
 
 The extensions prefer a site-local `./inkstead-writer` wrapper when available. Outside Writer sites, they fall back to the standalone `plume` command on `PATH`.
 
-## Troubleshooting Editor Setup
+## Troubleshooting
 
 If diagnostics or formatting do not appear:
 

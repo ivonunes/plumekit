@@ -1,4 +1,4 @@
-# Template Syntax
+# Syntax
 
 Plume syntax is deliberately small. Templates stay close to HTML, and the extra syntax is reserved for values, control flow, reusable components, resources, and behaviour.
 
@@ -201,7 +201,7 @@ Some values also support method-style calls:
 
 Useful methods include `contains`, `startsWith`, `endsWith`, `replace`, `replaceFirst`, `split`, `lowercased`, `uppercased`, and `slugify`.
 
-## Attribute Helpers
+## Attributes
 
 Plume includes helpers for common conditional attributes:
 
