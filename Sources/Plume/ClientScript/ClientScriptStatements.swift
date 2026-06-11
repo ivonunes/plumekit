@@ -184,7 +184,7 @@ extension ClientScriptCompiler {
             let value = try firstArgument(
                 call, method: "setText", lineNumber: lineNumber, sourceLine: sourceLine)
             return
-                "if (\(target)) \(target).textContent = String(\(transformExpression(value)) ?? \"\");"
+                "if (\(target)) \(target).textContent = String((\(transformExpression(value))) ?? \"\");"
         case "setAttribute":
             guard call.arguments.count >= 2 else {
                 throw error(
@@ -192,7 +192,7 @@ extension ClientScriptCompiler {
                 )
             }
             return
-                "if (\(target)) \(target).setAttribute(\(transformExpression(call.arguments[0].expression)), String(\(transformExpression(call.arguments[1].expression)) ?? \"\"));"
+                "if (\(target)) \(target).setAttribute(\(transformExpression(call.arguments[0].expression)), String((\(transformExpression(call.arguments[1].expression))) ?? \"\"));"
         case "removeAttribute":
             let name = try firstArgument(
                 call, method: "removeAttribute", lineNumber: lineNumber, sourceLine: sourceLine)
@@ -204,7 +204,7 @@ extension ClientScriptCompiler {
                     sourceLine: sourceLine)
             }
             return
-                "\(target)?.style.setProperty(\(transformExpression(call.arguments[0].expression)), String(\(transformExpression(call.arguments[1].expression)) ?? \"\"));"
+                "\(target)?.style.setProperty(\(transformExpression(call.arguments[0].expression)), String((\(transformExpression(call.arguments[1].expression))) ?? \"\"));"
         case "removeStyle":
             let name = try firstArgument(
                 call, method: "removeStyle", lineNumber: lineNumber, sourceLine: sourceLine)

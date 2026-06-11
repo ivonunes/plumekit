@@ -74,7 +74,11 @@ public struct PlumeTemplateEnvironment {
         components = definitions
     }
 
-    private static func componentSourcePrecedence(
+    init(components: [String: PlumeComponent]) {
+        self.components = components
+    }
+
+    static func componentSourcePrecedence(
         _ lhs: Dictionary<String, String>.Element,
         _ rhs: Dictionary<String, String>.Element
     ) -> Bool {

@@ -5,7 +5,7 @@ extension PlumeRenderer {
         let evaluated = try arguments.map { try evaluate($0) }
         switch name {
         case "default":
-            return truthy(value) ? value : argument(evaluated)
+            return missing(value) ? argument(evaluated) : value
         case "date":
             return formatDate(value, format: argument(evaluated).map(stringify))
         case "dateToXMLSchema":
@@ -218,30 +218,7 @@ extension PlumeRenderer {
     }
 
     func suggestion(for value: String, in candidates: [String]) -> String {
-        guard let best = candidates.min(by: { levenshtein(value, $0) < levenshtein(value, $1) })
-        else {
-            return ""
-        }
-        return levenshtein(value, best) <= 3 ? " Did you mean \(best)?" : ""
-    }
-
-    func levenshtein(_ left: String, _ right: String) -> Int {
-        let left = Array(left)
-        let right = Array(right)
-        var previous = Array(0...right.count)
-        var current = Array(repeating: 0, count: right.count + 1)
-        for (leftIndex, leftCharacter) in left.enumerated() {
-            current[0] = leftIndex + 1
-            for (rightIndex, rightCharacter) in right.enumerated() {
-                current[rightIndex + 1] = min(
-                    previous[rightIndex + 1] + 1,
-                    current[rightIndex] + 1,
-                    previous[rightIndex] + (leftCharacter == rightCharacter ? 0 : 1)
-                )
-            }
-            previous = current
-        }
-        return previous[right.count]
+        PlumeScanning.suggestion(for: value, in: candidates)
     }
 
     func parseFilter(_ filter: String) -> (name: String, arguments: [String]) {

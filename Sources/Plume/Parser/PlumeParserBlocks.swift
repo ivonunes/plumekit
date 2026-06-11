@@ -7,19 +7,8 @@ extension PlumeParser {
         index = skipWhitespace(from: index)
         try consumeOpeningBrace(for: "@comment")
         var depth = 1
-        var quote: Character?
         while index < source.endIndex {
             let character = source[index]
-            if let quoteCharacter = quote {
-                if character == quoteCharacter { quote = nil }
-                advance()
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-                advance()
-                continue
-            }
             if character == "{" {
                 depth += 1
             } else if character == "}" {

@@ -66,6 +66,29 @@ extension PlumeRenderer {
         return arguments[index]
     }
 
+    func missing(_ value: Any?) -> Bool {
+        guard let value else { return true }
+        if value is NSNull { return true }
+        if let number = value as? NSNumber {
+            guard isBooleanNumber(number) else { return false }
+            return !number.boolValue
+        }
+        if let string = value as? String { return string.isEmpty }
+        if let array = value as? [Any] { return array.isEmpty }
+        return false
+    }
+
+    /// NSNumber erases the distinction between booleans and numbers, but contexts
+    /// decoded with JSONSerialization deliver both as NSNumber. On Darwin the
+    /// CFBoolean type identifies booleans; on Linux the encoded objCType does.
+    func isBooleanNumber(_ number: NSNumber) -> Bool {
+        #if canImport(Darwin)
+        return CFGetTypeID(number) == CFBooleanGetTypeID()
+        #else
+        return String(cString: number.objCType) == "c"
+        #endif
+    }
+
     func truthy(_ value: Any?) -> Bool {
         guard let value else { return false }
         if value is NSNull { return false }
@@ -79,14 +102,30 @@ extension PlumeRenderer {
 
     mutating func compare(left: Any?, op: String, right: Any?) throws -> Bool {
         switch op {
-        case "==": return stringify(left) == stringify(right)
-        case "!=": return stringify(left) != stringify(right)
+        case "==": return equal(left, right)
+        case "!=": return !equal(left, right)
         case ">": return number(left) > number(right)
         case "<": return number(left) < number(right)
         case ">=": return number(left) >= number(right)
         case "<=": return number(left) <= number(right)
         default: return false
         }
+    }
+
+    func equal(_ left: Any?, _ right: Any?) -> Bool {
+        if let leftNumber = numericValue(left), let rightNumber = numericValue(right) {
+            return leftNumber == rightNumber
+        }
+        return stringify(left) == stringify(right)
+    }
+
+    func numericValue(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber {
+            guard !isBooleanNumber(number) else { return nil }
+            return number.doubleValue
+        }
+        if let string = value as? String { return Double(string) }
+        return nil
     }
 
     func number(_ value: Any?) -> Double {
@@ -101,7 +140,9 @@ extension PlumeRenderer {
         if value is NSNull { return "" }
         if let safe = value as? PlumeSafeHTML { return safe.html }
         if let string = value as? String { return string }
-        if let bool = value as? Bool { return bool ? "true" : "false" }
+        if let number = value as? NSNumber, isBooleanNumber(number) {
+            return number.boolValue ? "true" : "false"
+        }
         if let int = value as? Int { return String(int) }
         if let double = value as? Double { return String(double) }
         if let array = value as? [Any] {

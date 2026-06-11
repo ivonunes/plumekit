@@ -1,6 +1,10 @@
 import Foundation
 
 extension PlumeRenderer {
+    static let splitExpressionCache = PlumeMemoCache<[String]>()
+    static let comparisonCache = PlumeMemoCache<[String]?>()
+    static let ternaryCache = PlumeMemoCache<[String]?>()
+
     func stripOuterParentheses(_ expression: String) -> String {
         var output = expression
         while output.hasPrefix("("), output.hasSuffix(")"), matchingOuterParentheses(output) {
@@ -73,15 +77,29 @@ extension PlumeRenderer {
     }
 
     func comparison(in expression: String) -> (left: String, op: String, right: String)? {
-        for op in ["==", "!=", ">=", "<=", ">", "<"] {
-            if let result = infix(expression, operatorText: op) {
-                return (result.left, op, result.right)
+        let parts = Self.comparisonCache.value(for: expression) {
+            for op in ["==", "!=", ">=", "<=", ">", "<"] {
+                if let result = infix(expression, operatorText: op) {
+                    return [result.left, op, result.right]
+                }
             }
+            return nil
         }
-        return nil
+        guard let parts else { return nil }
+        return (parts[0], parts[1], parts[2])
     }
 
     func ternary(in expression: String) -> (
+        condition: String, trueExpression: String, falseExpression: String
+    )? {
+        let parts = Self.ternaryCache.value(for: expression) {
+            scanTernary(in: expression).map { [$0.condition, $0.trueExpression, $0.falseExpression] }
+        }
+        guard let parts else { return nil }
+        return (parts[0], parts[1], parts[2])
+    }
+
+    func scanTernary(in expression: String) -> (
         condition: String, trueExpression: String, falseExpression: String
     )? {
         var quote: Character?
@@ -162,136 +180,42 @@ extension PlumeRenderer {
     }
 
     func topLevelIndex(of needle: Character, in expression: String) -> String.Index? {
-        var quote: Character?
-        var parenDepth = 0
-        var bracketDepth = 0
-        var index = expression.startIndex
-        while index < expression.endIndex {
-            let character = expression[index]
-            if let quoteCharacter = quote {
-                if character == quoteCharacter { quote = nil }
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "(" {
-                parenDepth += 1
-            } else if character == ")" {
-                parenDepth = max(0, parenDepth - 1)
-            } else if character == "[" {
-                bracketDepth += 1
-            } else if character == "]" {
-                bracketDepth = max(0, bracketDepth - 1)
-            } else if character == needle, parenDepth == 0, bracketDepth == 0 {
-                return index
-            }
-            index = expression.index(after: index)
-        }
-        return nil
+        PlumeScanning.topLevelIndex(of: needle, in: expression)
     }
 
     func splitExpression(_ expression: String, separator: String) -> [String] {
-        var parts: [String] = []
-        var current = ""
-        var quote: Character?
-        var parenDepth = 0
-        var bracketDepth = 0
-        var index = expression.startIndex
-        while index < expression.endIndex {
-            let character = expression[index]
-            if let quoteCharacter = quote {
-                current.append(character)
-                if character == quoteCharacter { quote = nil }
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "(" {
-                parenDepth += 1
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == ")" {
-                parenDepth = max(0, parenDepth - 1)
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "[" {
-                bracketDepth += 1
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "]" {
-                bracketDepth = max(0, bracketDepth - 1)
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if parenDepth == 0, bracketDepth == 0, expression[index...].hasPrefix(separator),
-                !isLogicalPipe(in: expression, at: index, separator: separator)
-            {
-                parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-                current = ""
-                index = expression.index(index, offsetBy: separator.count)
-                continue
-            }
-            current.append(character)
-            index = expression.index(after: index)
+        Self.splitExpressionCache.value(for: separator + "\u{1F}" + expression) {
+            PlumeScanning.splitExpression(expression, separator: separator, skippingLogicalPipes: true)
         }
-        parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-        return parts
-    }
-
-    func isLogicalPipe(in expression: String, at index: String.Index, separator: String) -> Bool {
-        guard separator == "|" else { return false }
-        let next = expression.index(after: index)
-        if next < expression.endIndex, expression[next] == "|" { return true }
-        if index > expression.startIndex {
-            let previous = expression.index(before: index)
-            if expression[previous] == "|" { return true }
-        }
-        return false
     }
 
     func quoted(_ expression: String) -> String? {
-        guard expression.count >= 2 else { return nil }
-        if expression.first == "\"", expression.last == "\"" {
-            return String(expression.dropFirst().dropLast())
+        guard expression.count >= 2, let quote = expression.first, quote == "\"" || quote == "'"
+        else {
+            return nil
         }
-        if expression.first == "'", expression.last == "'" {
-            return String(expression.dropFirst().dropLast())
+        var index = expression.index(after: expression.startIndex)
+        while index < expression.endIndex {
+            let character = expression[index]
+            if character == "\\" {
+                index = expression.index(after: index)
+                if index < expression.endIndex { index = expression.index(after: index) }
+                continue
+            }
+            if character == quote {
+                guard expression.index(after: index) == expression.endIndex else { return nil }
+                return String(expression.dropFirst().dropLast())
+            }
+            index = expression.index(after: index)
         }
         return nil
     }
 
     func escapeHTML(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        PlumeScanning.escapeHTML(value)
     }
 
     func escapeHTMLOnce(_ value: String) -> String {
-        value
-            .replacingOccurrences(
-                of: #"&(?!(?:[A-Za-z]+|#[0-9]+|#x[0-9A-Fa-f]+);)"#, with: "&amp;",
-                options: .regularExpression
-            )
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        PlumeScanning.escapeHTMLOnce(value)
     }
 }

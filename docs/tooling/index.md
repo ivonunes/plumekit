@@ -35,6 +35,12 @@ Run the language server:
 plume language-server
 ```
 
+Print the Plume version:
+
+```sh
+plume version
+```
+
 ## Feedback
 
 While writing templates, run `check` when you want diagnostics and `format` when you want the file rewritten:

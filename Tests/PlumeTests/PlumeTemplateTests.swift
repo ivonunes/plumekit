@@ -293,8 +293,8 @@ final class PlumeTemplateTests: XCTestCase {
         XCTAssertEqual(result.state["offset"] as? String, "0")
         XCTAssertTrue(result.html.contains(#"style="--translate-main-slider: 0;""#))
         XCTAssertTrue(result.html.contains(#"data-plume-style---translate-main-slider="offset""#))
-        XCTAssertTrue(result.html.contains(#"data-plume-on-mouseleave="offset.set('0')""#))
-        XCTAssertTrue(result.html.contains(#"data-plume-on-mouseover="offset.set('100%')""#))
+        XCTAssertTrue(result.html.contains(#"data-plume-on-mouseleave="offset.set(&#39;0&#39;)""#))
+        XCTAssertTrue(result.html.contains(#"data-plume-on-mouseover="offset.set(&#39;100%&#39;)""#))
         XCTAssertTrue(result.html.contains(#"data-plume-on-click="page.scrollToTop(smooth: true)""#))
     }
 
@@ -312,8 +312,8 @@ final class PlumeTemplateTests: XCTestCase {
         let result = try template.renderResult([:])
 
         XCTAssertTrue(result.requiresRuntime)
-        XCTAssertTrue(result.html.contains(#"data-plume-on-resize="page.measure('.active', into: ['sliderX', 'sliderWidth'])""#))
-        XCTAssertTrue(result.html.contains(#"data-plume-on-pointerenter="page.measure(event.target, into: ['sliderX', 'sliderWidth'], round: true)""#))
+        XCTAssertTrue(result.html.contains(#"data-plume-on-resize="page.measure(&#39;.active&#39;, into: [&#39;sliderX&#39;, &#39;sliderWidth&#39;])""#))
+        XCTAssertTrue(result.html.contains(#"data-plume-on-pointerenter="page.measure(event.target, into: [&#39;sliderX&#39;, &#39;sliderWidth&#39;], round: true)""#))
         XCTAssertTrue(result.html.contains(#"--slider-x: 0px"#))
         XCTAssertTrue(result.html.contains(#"--slider-width: 0px"#))
         XCTAssertTrue(result.html.contains(#"data-plume-style-template---slider-x="{sliderX}px""#))

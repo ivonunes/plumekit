@@ -162,6 +162,8 @@ Plume checks component calls against their definitions. Unknown arguments and du
 
 That makes component APIs safer to evolve than loose includes or partials.
 
+Plume also guards against runaway recursion. A component that calls itself, directly or through other components, is reported as a template error past a depth limit instead of hanging the render.
+
 ## Loading
 
 Plume itself does not require a component folder. Hosts decide which component sources to provide to a template environment.

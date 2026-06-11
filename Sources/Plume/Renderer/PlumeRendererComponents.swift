@@ -1,6 +1,8 @@
 import Foundation
 
 extension PlumeRenderer {
+    static let maximumComponentDepth = 64
+
     mutating func renderComponent(
         name: String, arguments: [PlumeArgument], body: [PlumeNode], context: PlumeSourceContext?
     ) throws -> PlumeFragment {
@@ -9,6 +11,13 @@ extension PlumeRenderer {
                 "Unknown Plume component: \(name).\(suggestion(for: name, in: Array(components.keys)))",
                 context: context)
         }
+        guard componentDepth < Self.maximumComponentDepth else {
+            throw PlumeError.template(
+                "Component nesting exceeded \(Self.maximumComponentDepth) levels while rendering \(name). Check for recursive component calls.",
+                context: context)
+        }
+        componentDepth += 1
+        defer { componentDepth -= 1 }
         var scope = try componentScope(component, arguments: arguments, context: context)
         let slots = try renderSlots(from: body)
         let defaultSlot = slots["default"] ?? PlumeFragment()

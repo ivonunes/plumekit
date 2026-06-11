@@ -1,8 +1,26 @@
 import Foundation
 
 extension PlumeRenderer {
+    static let dateFormatterLock = NSLock()
+    static let outputDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+    static let parsingDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+    nonisolated(unsafe) static let iso8601DateFormatter = ISO8601DateFormatter()
+
     func numeric(_ value: Double) -> Any {
-        value.rounded() == value ? Int(value) : value
+        guard value.rounded() == value, let int = Int(exactly: value.rounded()) else {
+            return value
+        }
+        return int
     }
 
     func size(of value: Any?) -> Int {
@@ -68,9 +86,9 @@ extension PlumeRenderer {
 
     func formatDate(_ value: Any?, dateFormat: String) -> String {
         guard let date = date(from: value) else { return "" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_GB")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        Self.dateFormatterLock.lock()
+        defer { Self.dateFormatterLock.unlock() }
+        let formatter = Self.outputDateFormatter
         formatter.dateFormat = dateFormat
         return formatter.string(from: date)
     }
@@ -81,11 +99,10 @@ extension PlumeRenderer {
         if let double = value as? Double { return Date(timeIntervalSince1970: double) }
         let text = stringify(value).trimmingCharacters(in: .whitespacesAndNewlines)
         if text == "now" || text == "today" { return Date() }
-        let iso = ISO8601DateFormatter()
-        if let date = iso.date(from: text) { return date }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let date = Self.iso8601DateFormatter.date(from: text) { return date }
+        Self.dateFormatterLock.lock()
+        defer { Self.dateFormatterLock.unlock() }
+        let formatter = Self.parsingDateFormatter
         for format in ["yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ssXXXXX"] {
             formatter.dateFormat = format
             if let date = formatter.date(from: text) { return date }

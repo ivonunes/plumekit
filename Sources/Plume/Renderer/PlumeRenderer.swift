@@ -9,6 +9,7 @@ struct PlumeRenderer {
     var stateValues: [String: Any] = [:]
     var bindings: [String: PlumeBinding] = [:]
     var nextBindingID = 0
+    var componentDepth = 0
     var styles: [PlumeStyleResource] = []
     var scripts: [PlumeScriptResource] = []
     var navigation: [PlumeNavigationResource] = []

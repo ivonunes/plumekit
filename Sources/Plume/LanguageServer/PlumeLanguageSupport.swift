@@ -65,6 +65,8 @@ public struct PlumeDocumentSymbol: Equatable, Sendable {
 }
 
 public enum PlumeLanguageSupport {
+    private static let componentCache = PlumeMemoCache<[String: PlumeComponent]?>(limit: 256)
+
     public static func diagnostics(
         for source: String,
         sourceName: String? = nil,
@@ -72,11 +74,42 @@ public enum PlumeLanguageSupport {
     ) -> [PlumeDiagnostic] {
         do {
             let environment = try PlumeTemplateEnvironment(componentSources: componentSources)
+            return diagnostics(for: source, sourceName: sourceName, environment: environment)
+        } catch {
+            return [diagnostic(from: error, fallbackSourceName: sourceName)]
+        }
+    }
+
+    public static func diagnostics(
+        for source: String,
+        sourceName: String? = nil,
+        environment: PlumeTemplateEnvironment
+    ) -> [PlumeDiagnostic] {
+        do {
             let template = try PlumeTemplate(source, sourceName: sourceName, environment: environment)
             let result = try template.check()
             return scriptDiagnostics(in: result.scripts)
         } catch {
             return [diagnostic(from: error, fallbackSourceName: sourceName)]
+        }
+    }
+
+    public static func environment(componentSources: [String: String]) -> PlumeTemplateEnvironment {
+        var definitions: [String: PlumeComponent] = [:]
+        for (name, source) in componentSources.sorted(by: PlumeTemplateEnvironment.componentSourcePrecedence) {
+            guard let collected = parsedComponents(name: name, source: source) else { continue }
+            for (componentName, component) in collected {
+                definitions[componentName] = component
+            }
+        }
+        return PlumeTemplateEnvironment(components: definitions)
+    }
+
+    private static func parsedComponents(name: String, source: String) -> [String: PlumeComponent]? {
+        componentCache.value(for: name + "\u{1F}" + source) {
+            var parser = PlumeParser(source, sourceName: name)
+            guard let nodes = try? parser.parseTemplate() else { return nil }
+            return PlumeTemplate.collectComponents(from: nodes)
         }
     }
 

@@ -5,8 +5,15 @@ public final class PlumeLanguageServer {
     private let output: FileHandle
     private let fileManager: FileManager
     private var documents: [String: String] = [:]
+    private var diskCache: [String: (modified: Date, contents: String)] = [:]
     private var rootURL: URL?
     private var shouldExit = false
+
+    private enum Frame {
+        case message([String: Any])
+        case malformed
+        case endOfStream
+    }
 
     public init(
         input: FileHandle = .standardInput,
@@ -19,8 +26,15 @@ public final class PlumeLanguageServer {
     }
 
     public func run() {
-        while !shouldExit, let message = readMessage() {
-            handle(message)
+        while !shouldExit {
+            switch readMessage() {
+            case .message(let message):
+                handle(message)
+            case .malformed:
+                continue
+            case .endOfStream:
+                return
+            }
         }
     }
 
@@ -109,7 +123,7 @@ public final class PlumeLanguageServer {
             ],
             "serverInfo": [
                 "name": "Plume",
-                "version": "1.0.0"
+                "version": PlumeVersion.current
             ]
         ]
     }
@@ -118,7 +132,8 @@ public final class PlumeLanguageServer {
         let diagnostics = PlumeLanguageSupport.diagnostics(
             for: source,
             sourceName: sourceName(for: uri),
-            componentSources: componentSources(currentURI: uri)
+            environment: PlumeLanguageSupport.environment(
+                componentSources: componentSources(currentURI: uri))
         )
         sendNotification("textDocument/publishDiagnostics", params: [
             "uri": uri,
@@ -149,15 +164,30 @@ public final class PlumeLanguageServer {
             }
             guard file.standardizedFileURL.path != currentPath,
                   file.pathExtension == "plume",
-                  let values = try? file.resourceValues(forKeys: [.isRegularFileKey]),
-                  values.isRegularFile == true,
-                  let source = try? String(contentsOf: file, encoding: .utf8) else {
+                  let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey]),
+                  values.isRegularFile == true else {
                 continue
             }
             let name = relativePath(file, root: rootURL)
+            guard sources[name] == nil,
+                  let source = cachedContents(of: file, modified: values.contentModificationDate) else {
+                continue
+            }
             sources[name] = source
         }
         return sources
+    }
+
+    private func cachedContents(of file: URL, modified: Date?) -> String? {
+        let path = file.standardizedFileURL.path
+        if let modified, let cached = diskCache[path], cached.modified == modified {
+            return cached.contents
+        }
+        guard let contents = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        if let modified {
+            diskCache[path] = (modified, contents)
+        }
+        return contents
     }
 
     private func shouldSkipDirectory(_ url: URL) -> Bool {
@@ -199,11 +229,11 @@ public final class PlumeLanguageServer {
             return nil
         }
 
-        let end = min(max(0, character), lineText.count)
-        let prefix = String(lineText.prefix(end))
+        let end = min(max(0, character), lineText.utf16.count)
+        let prefix = characterPrefix(upToUTF16: end, in: lineText)
         let tokenStart = directiveTokenStart(in: prefix)
         return [
-            "start": ["line": lineIndex, "character": tokenStart],
+            "start": ["line": lineIndex, "character": utf16Column(forCharacterOffset: tokenStart, in: lineText)],
             "end": ["line": lineIndex, "character": end]
         ]
     }
@@ -224,10 +254,11 @@ public final class PlumeLanguageServer {
         let lineIndex = max(0, diagnostic.line - 1)
         let columnIndex = max(0, diagnostic.column - 1)
         let lineText = line(at: lineIndex, in: source) ?? diagnostic.sourceLine
-        let endColumn = min(max(columnIndex + 1, columnIndex), max(lineText.count, columnIndex + 1))
+        let startColumn = utf16Column(forCharacterOffset: columnIndex, in: lineText)
+        let endColumn = max(startColumn + 1, utf16Column(forCharacterOffset: columnIndex + 1, in: lineText))
         return [
             "range": [
-                "start": ["line": lineIndex, "character": columnIndex],
+                "start": ["line": lineIndex, "character": startColumn],
                 "end": ["line": lineIndex, "character": endColumn]
             ],
             "severity": diagnostic.severity.rawValue,
@@ -256,8 +287,26 @@ public final class PlumeLanguageServer {
         let lines = source.components(separatedBy: .newlines)
         return [
             "start": ["line": 0, "character": 0],
-            "end": ["line": max(0, lines.count - 1), "character": lines.last?.count ?? 0]
+            "end": ["line": max(0, lines.count - 1), "character": lines.last?.utf16.count ?? 0]
         ]
+    }
+
+    private func utf16Column(forCharacterOffset offset: Int, in line: String) -> Int {
+        guard offset > 0 else { return 0 }
+        guard offset < line.count else { return line.utf16.count + (offset - line.count) }
+        return String(line.prefix(offset)).utf16.count
+    }
+
+    private func characterPrefix(upToUTF16 column: Int, in line: String) -> String {
+        var total = 0
+        var prefix = ""
+        for character in line {
+            let next = total + String(character).utf16.count
+            if next > column { break }
+            prefix.append(character)
+            total = next
+        }
+        return prefix
     }
 
     private func source(for uri: String) -> String? {
@@ -341,17 +390,21 @@ public final class PlumeLanguageServer {
         output.write(body)
     }
 
-    private func readMessage() -> [String: Any]? {
-        guard let header = readHeader(),
-              let length = contentLength(in: header) else {
-            return nil
+    private func readMessage() -> Frame {
+        guard let header = readHeader() else {
+            return .endOfStream
+        }
+        guard let length = contentLength(in: header) else {
+            return .malformed
         }
         let body = input.readData(ofLength: length)
-        guard body.count == length,
-              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
-            return nil
+        guard body.count == length else {
+            return .endOfStream
         }
-        return object
+        guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return .malformed
+        }
+        return .message(object)
     }
 
     private func readHeader() -> String? {

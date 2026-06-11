@@ -74,36 +74,15 @@ extension PlumeParser {
         return nil
     }
 
-    func shouldParseStyleDirective() -> Bool {
-        guard source[index...].hasPrefix("@style") else { return false }
-        let after = source.index(index, offsetBy: "@style".count)
+    func shouldParseDirective(_ directive: String, allowingBlockBody: Bool) -> Bool {
+        guard source[index...].hasPrefix(directive) else { return false }
+        let after = source.index(index, offsetBy: directive.count)
         guard after < source.endIndex else { return true }
         let character = source[after]
-        return character == " " || character == "\t" || character == "\n" || character == "\r" || character == "(" || character == "{"
-    }
-
-    func shouldParseScriptDirective() -> Bool {
-        guard source[index...].hasPrefix("@script") else { return false }
-        let after = source.index(index, offsetBy: "@script".count)
-        guard after < source.endIndex else { return true }
-        let character = source[after]
-        return character == " " || character == "\t" || character == "\n" || character == "\r" || character == "(" || character == "{"
-    }
-
-    func shouldParseNavigationDirective() -> Bool {
-        guard source[index...].hasPrefix("@navigation") else { return false }
-        let after = source.index(index, offsetBy: "@navigation".count)
-        guard after < source.endIndex else { return true }
-        let character = source[after]
-        return character == " " || character == "\t" || character == "\n" || character == "\r" || character == "(" || character == "{"
-    }
-
-    func shouldParseImageDirective() -> Bool {
-        guard source[index...].hasPrefix("@image") else { return false }
-        let after = source.index(index, offsetBy: "@image".count)
-        guard after < source.endIndex else { return true }
-        let character = source[after]
-        return character == " " || character == "\t" || character == "\n" || character == "\r" || character == "("
+        if character == " " || character == "\t" || character == "\n" || character == "\r" || character == "(" {
+            return true
+        }
+        return allowingBlockBody && character == "{"
     }
 
     func shouldParseSlotDirective() -> Bool {
@@ -112,14 +91,6 @@ extension PlumeParser {
         guard after < source.endIndex else { return true }
         let character = source[after]
         return !(character.isLetter || character.isNumber || character == "_" || character == "-")
-    }
-
-    func shouldParseContentDirective() -> Bool {
-        guard source[index...].hasPrefix("@content") else { return false }
-        let after = source.index(index, offsetBy: "@content".count)
-        guard after < source.endIndex else { return true }
-        let character = source[after]
-        return character == " " || character == "\t" || character == "\n" || character == "\r" || character == "("
     }
 
     func shouldParseComponentCall() -> Bool {
@@ -143,94 +114,11 @@ extension PlumeParser {
     }
 
     func splitExpression(_ expression: String, separator: String) -> [String] {
-        var parts: [String] = []
-        var current = ""
-        var quote: Character?
-        var parenDepth = 0
-        var bracketDepth = 0
-        var index = expression.startIndex
-        while index < expression.endIndex {
-            let character = expression[index]
-            if let quoteCharacter = quote {
-                current.append(character)
-                if character == quoteCharacter { quote = nil }
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "(" {
-                parenDepth += 1
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == ")" {
-                parenDepth = max(0, parenDepth - 1)
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "[" {
-                bracketDepth += 1
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "]" {
-                bracketDepth = max(0, bracketDepth - 1)
-                current.append(character)
-                index = expression.index(after: index)
-                continue
-            }
-            if parenDepth == 0, bracketDepth == 0, expression[index...].hasPrefix(separator) {
-                parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-                current = ""
-                index = expression.index(index, offsetBy: separator.count)
-                continue
-            }
-            current.append(character)
-            index = expression.index(after: index)
-        }
-        parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-        return parts
+        PlumeScanning.splitExpression(expression, separator: separator)
     }
 
     func topLevelIndex(of needle: Character, in expression: String) -> String.Index? {
-        var quote: Character?
-        var parenDepth = 0
-        var bracketDepth = 0
-        var index = expression.startIndex
-        while index < expression.endIndex {
-            let character = expression[index]
-            if let quoteCharacter = quote {
-                if character == quoteCharacter { quote = nil }
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "(" {
-                parenDepth += 1
-            } else if character == ")" {
-                parenDepth = max(0, parenDepth - 1)
-            } else if character == "[" {
-                bracketDepth += 1
-            } else if character == "]" {
-                bracketDepth = max(0, bracketDepth - 1)
-            } else if character == needle, parenDepth == 0, bracketDepth == 0 {
-                return index
-            }
-            index = expression.index(after: index)
-        }
-        return nil
+        PlumeScanning.topLevelIndex(of: needle, in: expression)
     }
 
     mutating func readLine() -> String {
@@ -268,25 +156,23 @@ extension PlumeParser {
     }
 
     func sourceContext(at location: String.Index) -> PlumeSourceContext {
-        var line = 1
-        var column = 1
-        var cursor = source.startIndex
-        var lineStart = source.startIndex
-        while cursor < location {
-            if source[cursor] == "\n" {
-                line += 1
-                column = 1
-                lineStart = source.index(after: cursor)
+        var low = 0
+        var high = lineStarts.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if lineStarts[mid] <= location {
+                low = mid
             } else {
-                column += 1
+                high = mid - 1
             }
-            cursor = source.index(after: cursor)
         }
+        let lineStart = lineStarts[low]
+        let column = source.distance(from: lineStart, to: location) + 1
         var lineEnd = location
         while lineEnd < source.endIndex, source[lineEnd] != "\n" {
             lineEnd = source.index(after: lineEnd)
         }
-        return PlumeSourceContext(sourceName: sourceName, line: line, column: column, sourceLine: String(source[lineStart..<lineEnd]))
+        return PlumeSourceContext(sourceName: sourceName, line: low + 1, column: column, sourceLine: String(source[lineStart..<lineEnd]))
     }
 
     func error(_ message: String, at context: PlumeSourceContext? = nil) -> PlumeError {

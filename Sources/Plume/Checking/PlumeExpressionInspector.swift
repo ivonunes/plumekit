@@ -112,76 +112,10 @@ enum PlumeExpressionInspector {
     }
 
     private static func topLevelIndex(of needle: Character, in expression: String) -> String.Index? {
-        var quote: Character?
-        var parenDepth = 0
-        var bracketDepth = 0
-        var index = expression.startIndex
-        while index < expression.endIndex {
-            let character = expression[index]
-            if let quoteCharacter = quote {
-                if character == quoteCharacter { quote = nil }
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-            } else if character == "(" {
-                parenDepth += 1
-            } else if character == ")" {
-                parenDepth = max(0, parenDepth - 1)
-            } else if character == "[" {
-                bracketDepth += 1
-            } else if character == "]" {
-                bracketDepth = max(0, bracketDepth - 1)
-            } else if character == needle, parenDepth == 0, bracketDepth == 0 {
-                return index
-            }
-            index = expression.index(after: index)
-        }
-        return nil
+        PlumeScanning.topLevelIndex(of: needle, in: expression)
     }
 
     private static func splitExpression(_ expression: String, separator: String) -> [String] {
-        var parts: [String] = []
-        var current = ""
-        var quote: Character?
-        var parenDepth = 0
-        var bracketDepth = 0
-        var index = expression.startIndex
-        while index < expression.endIndex {
-            let character = expression[index]
-            if let quoteCharacter = quote {
-                current.append(character)
-                if character == quoteCharacter { quote = nil }
-                index = expression.index(after: index)
-                continue
-            }
-            if character == "\"" || character == "'" {
-                quote = character
-                current.append(character)
-            } else if character == "(" {
-                parenDepth += 1
-                current.append(character)
-            } else if character == ")" {
-                parenDepth = max(0, parenDepth - 1)
-                current.append(character)
-            } else if character == "[" {
-                bracketDepth += 1
-                current.append(character)
-            } else if character == "]" {
-                bracketDepth = max(0, bracketDepth - 1)
-                current.append(character)
-            } else if parenDepth == 0, bracketDepth == 0, expression[index...].hasPrefix(separator) {
-                parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-                current = ""
-                index = expression.index(index, offsetBy: separator.count)
-                continue
-            } else {
-                current.append(character)
-            }
-            index = expression.index(after: index)
-        }
-        parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-        return parts
+        PlumeScanning.splitExpression(expression, separator: separator)
     }
 }

@@ -48,14 +48,15 @@ struct PlumeCLI {
         let componentSources = Dictionary(uniqueKeysWithValues: try files.map { file in
             (relativePath(file), try String(contentsOf: file, encoding: .utf8))
         })
+        let environment = PlumeLanguageSupport.environment(componentSources: componentSources)
         var failed = false
         for file in files {
-            let source = try String(contentsOf: file, encoding: .utf8)
             let name = relativePath(file)
+            let source = try componentSources[name] ?? String(contentsOf: file, encoding: .utf8)
             let diagnostics = PlumeLanguageSupport.diagnostics(
                 for: source,
                 sourceName: name,
-                componentSources: componentSources.filter { $0.key != name }
+                environment: environment
             )
             for diagnostic in diagnostics {
                 failed = true

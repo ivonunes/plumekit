@@ -13,10 +13,18 @@ jobs:
     name: Linux
     runs-on: ubuntu-latest
     container:
-      image: swift:latest
+      image: swift:6.3
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v5
+        with:
+          path: .build
+          key: linux-test-swiftpm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            linux-test-swiftpm-
 
       - name: Test
         run: swift test
@@ -53,6 +61,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Cache SwiftPM build
+        uses: actions/cache@v5
+        with:
+          path: .build
+          key: macos-test-swiftpm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            macos-test-swiftpm-
+
       - name: Test
         run: swift test
 
@@ -64,15 +80,27 @@ jobs:
         with:
           node-version: lts/*
 
+      - name: Cache Nova download
+        uses: actions/cache@v5
+        with:
+          path: nova-download/Nova.zip
+          key: nova-app-zip-v1
+
       - name: Install Nova
+        id: install-nova
+        continue-on-error: true
         run: |
-          curl -L https://download.panic.com/nova/Nova-Latest.zip -o "$RUNNER_TEMP/Nova.zip"
+          mkdir -p nova-download
+          if [ ! -f nova-download/Nova.zip ]; then
+            curl --fail -L https://download.panic.com/nova/Nova-Latest.zip -o nova-download/Nova.zip
+          fi
           mkdir -p "$RUNNER_TEMP/nova"
-          ditto -x -k "$RUNNER_TEMP/Nova.zip" "$RUNNER_TEMP/nova"
+          ditto -x -k nova-download/Nova.zip "$RUNNER_TEMP/nova"
           test -d "$RUNNER_TEMP/nova/Nova.app"
           echo "NOVA_APP_PATH=$RUNNER_TEMP/nova/Nova.app" >> "$GITHUB_ENV"
 
       - name: Build Nova extension
+        if: steps.install-nova.outcome == 'success'
         run: support/build-nova-extension.sh
 
       - name: Smoke test CLI

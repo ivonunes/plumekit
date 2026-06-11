@@ -53,6 +53,8 @@ Comparisons and boolean operators work in conditionals and bindings:
 <button disabled?="{items.size == 0}">Continue</button>
 ```
 
+Note that `!` negates the whole expression that follows it, so `!a == b` evaluates as `!(a == b)`. To compare a negated value, bind it first: `@let isHidden = !visible` and then `isHidden == true`.
+
 Use ternaries for small inline choices:
 
 ```plume
@@ -138,54 +140,14 @@ Filters transform values:
 {content | raw}
 ```
 
-Common string filters:
+The most common filters:
 
-- `default(value)`
-- `append(value)`
-- `prepend(value)`
-- `replace(target, replacement)`
-- `replaceFirst(target, replacement)`
-- `remove(value)`
-- `upcase`
-- `downcase`
-- `capitalize`
-- `strip`
-- `stripHTML`
-- `urlEncode`
-- `truncate(length)`
-- `truncateWords(count)`
-- `slugify`
+- `default(value)` — substitute for missing or empty values. The number `0` is kept.
+- `date(format)` — format a date.
+- `join(separator)`, `sort(field)`, `where(field, value)`, `map(field)` — work with arrays.
+- `upcase`, `downcase`, `truncate(length)`, `slugify` — transform strings.
 
-Common array filters:
-
-- `first`
-- `last`
-- `map(field)`
-- `where(field, value)`
-- `sort(field)`
-- `sortNatural(field)`
-- `reverse`
-- `unique`
-- `compact`
-- `concat(values)`
-- `join(separator)`
-- `size`
-
-Common date and number filters:
-
-- `date(format)`
-- `dateToXMLSchema`
-- `dateToRFC822`
-- `dateToString`
-- `dateToLongString`
-- `plus(value)`
-- `minus(value)`
-- `times(value)`
-- `dividedBy(value)`
-- `modulo(value)`
-- `round(precision)`
-- `atLeast(value)`
-- `atMost(value)`
+See [Filters](filters.md) for the complete reference, covering every string, array, number, date, and output filter.
 
 ## Methods
 

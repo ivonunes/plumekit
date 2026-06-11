@@ -1,8 +1,27 @@
 import Foundation
 
 extension PlumeRenderer {
+    static let bindingMarkerPrefix = "__PLUME_BINDING_"
+
+    static let tagRegex = try! NSRegularExpression(
+        pattern: #"<[^!/](?:[^<>"']|"[^"]*"|'[^']*')*>"#)
+    static let eventRegex = try! NSRegularExpression(
+        pattern: #"\son:([A-Za-z][A-Za-z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    static let styleHelperRegex = try! NSRegularExpression(
+        pattern: #"\sstyle:([-A-Za-z_][-A-Za-z0-9_]*|--[-A-Za-z0-9_-]+)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    static let classAppendRegex = try! NSRegularExpression(
+        pattern: #"\sclass\+=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    static let classHelperRegex = try! NSRegularExpression(
+        pattern: #"\sclass:([A-Za-z0-9_-]+)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    static let conditionalAttributeRegex = try! NSRegularExpression(
+        pattern: #"\s([A-Za-z_:][-A-Za-z0-9_:.]*):([A-Za-z0-9_.:-]+)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    static let optionalAttributeRegex = try! NSRegularExpression(
+        pattern: #"\s([A-Za-z_:][-A-Za-z0-9_:.]*)\?=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    static let classAttributeRegex = try! NSRegularExpression(
+        pattern: #"\sclass="([^"]*)""#)
+
     mutating func renderAttributeHelpers(_ html: String) throws -> String {
-        guard let regex = try? NSRegularExpression(pattern: #"<[^!/][^<>]*>"#) else { return html }
+        let regex = Self.tagRegex
         let ns = html as NSString
         var output = html
         for match in regex.matches(in: html, range: NSRange(location: 0, length: ns.length))
@@ -18,10 +37,16 @@ extension PlumeRenderer {
     }
 
     mutating func processTag(_ tag: String) -> String {
+        guard
+            tag.contains(":") || tag.contains("?=") || tag.contains("+=")
+                || tag.contains(Self.bindingMarkerPrefix)
+        else {
+            return tag
+        }
         var output = tag
         var activeClasses: [String] = []
-        let eventPattern = #"\son:([A-Za-z][A-Za-z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        if let regex = try? NSRegularExpression(pattern: eventPattern) {
+        do {
+            let regex = Self.eventRegex
             let ns = output as NSString
             for match in regex.matches(in: output, range: NSRange(location: 0, length: ns.length))
                 .reversed()
@@ -36,9 +61,8 @@ extension PlumeRenderer {
             }
         }
 
-        let stylePattern =
-            #"\sstyle:([-A-Za-z_][-A-Za-z0-9_]*|--[-A-Za-z0-9_-]+)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        if let regex = try? NSRegularExpression(pattern: stylePattern) {
+        do {
+            let regex = Self.styleHelperRegex
             let ns = output as NSString
             for match in regex.matches(in: output, range: NSRange(location: 0, length: ns.length))
                 .reversed()
@@ -63,8 +87,8 @@ extension PlumeRenderer {
             }
         }
 
-        let classAppendPattern = #"\sclass\+=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        if let regex = try? NSRegularExpression(pattern: classAppendPattern) {
+        do {
+            let regex = Self.classAppendRegex
             let ns = output as NSString
             for match in regex.matches(in: output, range: NSRange(location: 0, length: ns.length))
                 .reversed()
@@ -84,8 +108,8 @@ extension PlumeRenderer {
             }
         }
 
-        let classPattern = #"\sclass:([A-Za-z0-9_-]+)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        if let regex = try? NSRegularExpression(pattern: classPattern) {
+        do {
+            let regex = Self.classHelperRegex
             let ns = output as NSString
             for match in regex.matches(in: output, range: NSRange(location: 0, length: ns.length))
                 .reversed()
@@ -107,9 +131,8 @@ extension PlumeRenderer {
             }
         }
 
-        let conditionalAttributePattern =
-            #"\s([A-Za-z_:][-A-Za-z0-9_:.]*):([A-Za-z0-9_.:-]+)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        if let regex = try? NSRegularExpression(pattern: conditionalAttributePattern) {
+        do {
+            let regex = Self.conditionalAttributeRegex
             let ns = output as NSString
             for match in regex.matches(in: output, range: NSRange(location: 0, length: ns.length))
                 .reversed()
@@ -137,8 +160,8 @@ extension PlumeRenderer {
             }
         }
 
-        let optionalPattern = #"\s([A-Za-z_:][-A-Za-z0-9_:.]*)\?=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        if let regex = try? NSRegularExpression(pattern: optionalPattern) {
+        do {
+            let regex = Self.optionalAttributeRegex
             let ns = output as NSString
             for match in regex.matches(in: output, range: NSRange(location: 0, length: ns.length))
                 .reversed()
@@ -173,9 +196,8 @@ extension PlumeRenderer {
 
         guard !activeClasses.isEmpty else { return output }
         let joined = activeClasses.joined(separator: " ")
-        if let regex = try? NSRegularExpression(pattern: #"\sclass="([^"]*)""#),
-            let match = regex.firstMatch(
-                in: output, range: NSRange(location: 0, length: (output as NSString).length)),
+        if let match = Self.classAttributeRegex.firstMatch(
+            in: output, range: NSRange(location: 0, length: (output as NSString).length)),
             let classRange = Range(match.range(at: 1), in: output)
         {
             let current = String(output[classRange])
@@ -199,14 +221,13 @@ extension PlumeRenderer {
     }
 
     var xmlNamespaceAttributePrefixes: Set<String> {
-        ["xmlns", "xml", "xlink"]
+        ["xmlns", "xml", "xlink", "epub"]
     }
 
     func setAttribute(_ name: String, value: String, in tag: String) -> String {
         var output = tag
-        if let regex = try? NSRegularExpression(
-            pattern:
-                #"\s\#(NSRegularExpression.escapedPattern(for: name))=(?:"[^"]*"|'[^']*'|[^\s>]+)"#),
+        if let regex = PlumeRegexCache.shared.regex(
+            #"\s\#(NSRegularExpression.escapedPattern(for: name))=(?:"[^"]*"|'[^']*'|[^\s>]+)"#),
             let match = regex.firstMatch(
                 in: output, range: NSRange(location: 0, length: (output as NSString).length)),
             let range = Range(match.range, in: output)
@@ -224,9 +245,8 @@ extension PlumeRenderer {
     func removeAttribute(_ name: String, in tag: String) -> String {
         var output = tag
         guard
-            let regex = try? NSRegularExpression(
-                pattern:
-                    #"\s\#(NSRegularExpression.escapedPattern(for: name))=(?:"[^"]*"|'[^']*'|[^\s>]+)"#
+            let regex = PlumeRegexCache.shared.regex(
+                #"\s\#(NSRegularExpression.escapedPattern(for: name))=(?:"[^"]*"|'[^']*'|[^\s>]+)"#
             ),
             let match = regex.firstMatch(
                 in: output, range: NSRange(location: 0, length: (output as NSString).length)),
@@ -258,9 +278,8 @@ extension PlumeRenderer {
 
     func existingAttribute(_ name: String, in tag: String) -> String? {
         guard
-            let regex = try? NSRegularExpression(
-                pattern:
-                    #"\s\#(NSRegularExpression.escapedPattern(for: name))=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
+            let regex = PlumeRegexCache.shared.regex(
+                #"\s\#(NSRegularExpression.escapedPattern(for: name))=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
             ),
             let match = regex.firstMatch(
                 in: tag, range: NSRange(location: 0, length: (tag as NSString).length))
@@ -308,29 +327,75 @@ extension PlumeRenderer {
     }
 
     func replaceAttributeBindings(_ tag: String) -> String {
-        var output = tag
-        for (marker, binding) in bindings where output.contains(marker) {
-            output = output.replacingOccurrences(
-                of: marker, with: escapeAttribute(binding.rendered))
-            guard !binding.action else { continue }
-            guard let attrName = attributeName(containing: marker, in: tag) else { continue }
+        guard !bindings.isEmpty else { return tag }
+        var output = ""
+        var bound: [(name: String, expression: String)] = []
+        var seen = Set<String>()
+        var segmentStart = tag.startIndex
+        var index = tag.startIndex
+        while index < tag.endIndex {
+            guard tag[index] == "_", let match = bindingMarker(in: tag, at: index),
+                let binding = bindings[match.marker]
+            else {
+                index = tag.index(after: index)
+                continue
+            }
+            output += tag[segmentStart..<index]
+            output += escapeAttribute(binding.rendered)
+            if !binding.action, seen.insert(match.marker).inserted,
+                let attrName = attributeName(containing: match.marker, in: tag)
+            {
+                bound.append((attrName, binding.expression))
+            }
+            index = match.end
+            segmentStart = index
+        }
+        guard segmentStart > tag.startIndex else { return tag }
+        output += tag[segmentStart...]
+        for binding in bound {
             output = setAttribute(
-                "data-plume-bind-\(attrName)", value: binding.expression, in: output)
+                "data-plume-bind-\(binding.name)", value: binding.expression, in: output)
         }
         return output
     }
 
     func replaceTextBindings(_ html: String) -> String {
-        var output = html
-        for (marker, binding) in bindings where output.contains(marker) && !binding.action {
-            let replacement =
-                #"<span data-plume-text="\#(escapeAttribute(binding.expression))">\#(binding.rendered)</span>"#
-            output = output.replacingOccurrences(of: marker, with: replacement)
+        guard !bindings.isEmpty else { return html }
+        var output = ""
+        var segmentStart = html.startIndex
+        var index = html.startIndex
+        while index < html.endIndex {
+            guard html[index] == "_", let match = bindingMarker(in: html, at: index),
+                let binding = bindings[match.marker]
+            else {
+                index = html.index(after: index)
+                continue
+            }
+            output += html[segmentStart..<index]
+            if !binding.action {
+                output +=
+                    #"<span data-plume-text="\#(escapeAttribute(binding.expression))">\#(binding.rendered)</span>"#
+            }
+            index = match.end
+            segmentStart = index
         }
-        for marker in bindings.keys where output.contains(marker) {
-            output = output.replacingOccurrences(of: marker, with: "")
-        }
+        guard segmentStart > html.startIndex else { return html }
+        output += html[segmentStart...]
         return output
+    }
+
+    func bindingMarker(in text: String, at start: String.Index) -> (
+        marker: String, end: String.Index
+    )? {
+        guard text[start...].hasPrefix(Self.bindingMarkerPrefix) else { return nil }
+        var cursor = text.index(start, offsetBy: Self.bindingMarkerPrefix.count)
+        let digitsStart = cursor
+        while cursor < text.endIndex, ("0"..."9").contains(text[cursor]) {
+            cursor = text.index(after: cursor)
+        }
+        guard cursor > digitsStart, text[cursor...].hasPrefix("__") else { return nil }
+        let end = text.index(cursor, offsetBy: 2)
+        return (String(text[start..<end]), end)
     }
 
     func attributeName(containing marker: String, in tag: String) -> String? {
@@ -355,11 +420,7 @@ extension PlumeRenderer {
     }
 
     func escapeAttribute(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        PlumeScanning.escapeHTML(value)
     }
 
     func capture(in string: NSString, match: NSTextCheckingResult, indexes: [Int]) -> String {

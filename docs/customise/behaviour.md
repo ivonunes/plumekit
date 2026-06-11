@@ -148,7 +148,7 @@ Use `@script` when an interaction needs more than a single action:
 }
 ```
 
-Client scripts support `let`, `var`, `if`, `else`, `for item in items`, `on target.event` blocks, query helpers, class helpers, text and attribute helpers, and scroll helpers. Use `@script(language: "javascript")` when you need raw browser APIs.
+Client scripts support `let`, `var`, `if`, `else`, `for item in items`, `on target.event` blocks, query helpers, class helpers, text and attribute helpers, and scroll helpers. See [Client Scripts](client-scripts.md) for the full language reference. Use `@script(language: "javascript")` when you need raw browser APIs.
 
 Keep scripts close to the markup they enhance. If the script belongs to one component instance, use `@script(scoped)`. If it coordinates the whole page, put it in a page or layout template.
 

@@ -170,19 +170,19 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 echo "Downloading Plume $tag for $platform-$arch..."
 download "$base_url/$archive" "$tmp/$archive"
 
-if download "$base_url/$checksums" "$tmp/SHA256SUMS"; then
-    (
-        cd "$tmp"
-        grep " $archive\$" SHA256SUMS > "$archive.sha256"
-        if command_exists sha256sum; then
-            sha256sum -c "$archive.sha256"
-        else
-            shasum -a 256 -c "$archive.sha256"
-        fi
-    )
-else
-    echo "Warning: could not download SHA256SUMS; installing without checksum verification." >&2
-fi
+download "$base_url/$checksums" "$tmp/SHA256SUMS" || {
+    echo "Could not download SHA256SUMS; refusing to install without checksum verification." >&2
+    exit 1
+}
+(
+    cd "$tmp"
+    grep " $archive\$" SHA256SUMS > "$archive.sha256"
+    if command_exists sha256sum; then
+        sha256sum -c "$archive.sha256"
+    else
+        shasum -a 256 -c "$archive.sha256"
+    fi
+)
 
 tar -xzf "$tmp/$archive" -C "$tmp"
 install_file "$tmp/plume" "$bin_dir/plume"

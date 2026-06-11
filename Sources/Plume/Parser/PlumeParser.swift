@@ -4,11 +4,21 @@ struct PlumeParser {
     let source: String
     let sourceName: String?
     var index: String.Index
+    let lineStarts: [String.Index]
 
     init(_ source: String, sourceName: String? = nil) {
         self.source = source
         self.sourceName = sourceName
         self.index = source.startIndex
+        var lineStarts = [source.startIndex]
+        var cursor = source.startIndex
+        while cursor < source.endIndex {
+            if source[cursor] == "\n" {
+                lineStarts.append(source.index(after: cursor))
+            }
+            cursor = source.index(after: cursor)
+        }
+        self.lineStarts = lineStarts
     }
 
     mutating func parseTemplate() throws -> [PlumeNode] {
@@ -28,22 +38,22 @@ struct PlumeParser {
         }
 
         while index < source.endIndex {
-            if shouldParseStyleDirective() {
+            if shouldParseDirective("@style", allowingBlockBody: true) {
                 flushText()
                 nodes.append(try parseStyle())
                 continue
             }
-            if shouldParseScriptDirective() {
+            if shouldParseDirective("@script", allowingBlockBody: true) {
                 flushText()
                 nodes.append(try parseScript())
                 continue
             }
-            if shouldParseNavigationDirective() {
+            if shouldParseDirective("@navigation", allowingBlockBody: true) {
                 flushText()
                 nodes.append(try parseNavigation())
                 continue
             }
-            if shouldParseImageDirective() {
+            if shouldParseDirective("@image", allowingBlockBody: false) {
                 flushText()
                 nodes.append(try parseImage())
                 continue
@@ -53,7 +63,7 @@ struct PlumeParser {
                 nodes.append(try parseSlot())
                 continue
             }
-            if shouldParseContentDirective() {
+            if shouldParseDirective("@content", allowingBlockBody: false) {
                 flushText()
                 nodes.append(try parseContent())
                 continue

@@ -118,9 +118,41 @@ let diagnostics = PlumeLanguageSupport.diagnostics(
 
 The standalone language server and editor extensions use the same language support APIs.
 
+When checking many files that share components, build the environment once and reuse it:
+
+```swift
+let environment = PlumeLanguageSupport.environment(componentSources: components)
+
+for file in files {
+    let diagnostics = PlumeLanguageSupport.diagnostics(
+        for: file.source,
+        sourceName: file.name,
+        environment: environment
+    )
+}
+```
+
+This parses each component once instead of once per checked file.
+
 ## Runtime
 
 Emit the Plume runtime only when `result.requiresRuntime` is true. Static templates, components, styles, scripts, assets, and images do not need it unless the page also uses state, event bindings, browser actions, or navigation.
+
+Plume ships the runtime and the scoped-style rewriter as public API, so hosts do not need to implement the client-side contract themselves:
+
+```swift
+let runtime = PlumeBrowserRuntime.javaScript
+
+for style in result.styles {
+    var css = style.css ?? ""
+    if let attribute = style.scopeAttribute {
+        css = PlumeCSSScoper.scope(css, attribute: attribute)
+    }
+    // emit css
+}
+```
+
+Write `PlumeBrowserRuntime.javaScript` to a file, or inline it, on pages that require the runtime. Use `PlumeCSSScoper.scope` to apply a scoped style's scope attribute to its CSS before emitting it.
 
 When `@navigation` is enabled, the runtime intercepts same-origin links, fetches the next page, swaps the configured root element, updates the document title, loads missing Plume styles and module scripts, uses View Transitions where available, and falls back to a normal page load on errors.
 
