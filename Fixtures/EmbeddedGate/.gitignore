@@ -1,0 +1,5 @@
+.build/
+Sources/Gate/Generated/
+run.mjs
+.native.out
+.embedded.out

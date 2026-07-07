@@ -1,8 +1,8 @@
 import Foundation
 
 public struct PlumeTemplate {
-    private let nodes: [PlumeNode]
-    private let components: [String: PlumeComponent]
+    let nodes: [PlumeNode]
+    let components: [String: PlumeComponent]
 
     public init(_ source: String, sourceName: String? = nil, components componentSources: [String: String] = [:]) throws {
         try self.init(source, sourceName: sourceName, environment: PlumeTemplateEnvironment(componentSources: componentSources))

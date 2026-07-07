@@ -1,0 +1,24 @@
+# LocalStack (S3 / SQS / SSM / DynamoDB) + Postgres, for local AWS testing of the
+# Hello app without a real AWS account. Booted by support/aws-localstack.sh.
+#
+#   docker compose -f docker-compose.localstack.yml up -d
+#
+# Every PlumeKit AWS adapter is pointed here via AWS_ENDPOINT_URL=http://localhost:4566
+# (Postgres via DATABASE_URL).
+services:
+  localstack:
+    image: localstack/localstack:latest   # LocalStack uses CalVer tags (2026.MM); latest tracks them
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,ssm,dynamodb
+      - DEBUG=0
+
+  postgres:
+    image: postgres:18
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=app
+      - POSTGRES_DB=app

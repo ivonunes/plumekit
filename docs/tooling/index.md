@@ -1,44 +1,58 @@
 # Tooling
 
-Plume ships a small CLI for checking, formatting, and editor integration. The CLI is useful for standalone Plume users and for editor extensions.
+The `plumekit` CLI provides Plume's templating commands for checking, formatting, compiling, and editor integration.
 
-Inkstead Writer embeds Plume, so Writer sites usually run the same capabilities through `inkstead-writer theme ...`.
-
-If you need the standalone CLI first, see [Start](../start/getting-started.md).
+For the full command list (including `serve`, `dev`, `migrate`, `deploy`, and `generate`) and the `plumekit.toml` reference, see [The CLI](../cli.md). If you need to install the CLI first, see [Start](../start/getting-started.md).
 
 ## Commands
 
 Check templates:
 
 ```sh
-plume check
-plume check theme
-plume check theme/home.plume
+plumekit check
+plumekit check theme
+plumekit check theme/home.plume
 ```
+
+Compile templates to Embedded-Swift render functions (the compiling back-end):
+
+```sh
+plumekit compile Views/                 # print generated Swift to stdout
+plumekit compile Views/ -o Generated/   # write one .swift per template
+```
+
+See [Compiling templates](../compiling/index.md) for the renderable subset and
+the build-time-only features it rejects.
 
 Format templates:
 
 ```sh
-plume format theme
-plume format --check theme
+plumekit format theme
+plumekit format --check theme
 ```
+
+Formatting also canonicalises alias spellings to one Swift-spelled name per
+transform (for example `upcase` → `uppercased`, `startsWith` → `hasPrefix`,
+`null` → `nil`, and `@slot(name: x)` → `@slot(x)`). Both spellings keep parsing;
+the formatter rewrites to the canonical one. String-literal contents are left
+untouched.
 
 Format stdin for editor integrations:
 
 ```sh
-cat template.plume | plume format --stdin
+cat template.plume | plumekit format --stdin
 ```
 
 Run the language server:
 
 ```sh
-plume language-server
+plumekit language-server
 ```
 
-Print the Plume version:
+Print the version:
 
 ```sh
-plume version
+plumekit version
 ```
 
 ## Feedback
@@ -46,19 +60,19 @@ plume version
 While writing templates, run `check` when you want diagnostics and `format` when you want the file rewritten:
 
 ```sh
-plume check theme
-plume format theme
+plumekit check theme
+plumekit format theme
 ```
 
 In CI, use `format --check` so the build fails when committed templates are not formatted:
 
 ```sh
-plume format --check theme
+plumekit format --check theme
 ```
 
 ## Checks
 
-`plume check` validates:
+`plumekit check` validates:
 
 - Template syntax.
 - Component calls and component arguments.
@@ -67,24 +81,9 @@ plume format --check theme
 - Static style and script file references.
 - Static asset and image references the host can see.
 
-Inkstead Writer adds Writer-specific checks for theme paths, generated images, missing image alt text, and site context.
-
-## Writer
-
-Inside a Writer site, prefer the site-local wrapper:
-
-```sh
-./inkstead-writer theme check
-./inkstead-writer theme format
-./inkstead-writer theme format --check
-./inkstead-writer theme language-server
-```
-
-This uses the Plume version embedded in the Writer version pinned by the site.
-
 ## Editors
 
-VS Code and Nova extensions are packaged with each Plume release.
+VS Code and Nova extensions are packaged with each PlumeKit release.
 
 They provide:
 
@@ -95,13 +94,12 @@ They provide:
 - Directive and context completions.
 - Document symbols.
 
-The extensions prefer a site-local `./inkstead-writer` wrapper when available. Outside Writer sites, they fall back to the standalone `plume` command on `PATH`.
+The extensions use the `plumekit` command on `PATH`.
 
 ## Troubleshooting
 
 If diagnostics or formatting do not appear:
 
-- Confirm `plume language-server` runs in a terminal.
-- In an Inkstead Writer site, confirm `./inkstead-writer theme language-server` runs from the site root.
-- Run `plume check path/to/file.plume` to separate editor setup issues from template errors.
-- Make sure the editor extension can see either the site-local Writer wrapper or the standalone `plume` command on `PATH`.
+- Confirm `plumekit language-server` runs in a terminal.
+- Run `plumekit check path/to/file.plume` to separate editor setup issues from template errors.
+- Make sure the editor extension can see the `plumekit` command on `PATH`.

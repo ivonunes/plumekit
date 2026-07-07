@@ -30,6 +30,10 @@ jobs:
           restore-keys: |
             linux-test-swiftpm-
 
+      # C system libs the swift image lacks: libsqlite3 (SQLite driver) + libpq (Postgres driver).
+      - name: Install build deps
+        run: apt-get update && apt-get install -y libsqlite3-dev libpq-dev
+
       - name: Test
         run: swift test
 
@@ -39,6 +43,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # The runner's default Xcode Swift is older than the package's tools-version.
+      - name: Install Swift 6.3.2
+        run: |
+          curl -fsSL https://download.swift.org/swift-6.3.2-release/xcode/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE-osx.pkg -o /tmp/swift.pkg
+          sudo installer -pkg /tmp/swift.pkg -target /
+          echo "/Library/Developer/Toolchains/swift-6.3.2-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
 
       - name: Cache SwiftPM build
         uses: actions/cache@v5
@@ -87,13 +98,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Check tag matches Plume version
+      - name: Check tag matches PlumeKit version
         run: |
           VERSION="$(sed -n 's/.*current = "\(.*\)".*/\1/p' Sources/Plume/Core/PlumeVersion.swift)"
           if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match Plume version $VERSION"
+            echo "Tag $GITHUB_REF_NAME does not match PlumeKit version $VERSION"
             exit 1
           fi
+
+      - name: Install build deps
+        run: apt-get update && apt-get install -y libsqlite3-dev libpq-dev
 
       - name: Build
         run: swift build -c release --static-swift-stdlib
@@ -101,26 +115,26 @@ jobs:
       - name: Package
         run: |
           mkdir -p artifact
-          cp .build/release/plume artifact/plume
+          cp .build/release/plumekit artifact/plumekit
           cp LICENSE.txt artifact/LICENSE.txt
-          tar -C artifact -czf plume-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz plume LICENSE.txt
+          tar -C artifact -czf plumekit-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz plumekit LICENSE.txt
 
       - name: Smoke test archive
         run: |
           mkdir -p smoke
-          tar -xzf plume-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz -C smoke
-          test -x smoke/plume
+          tar -xzf plumekit-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz -C smoke
+          test -x smoke/plumekit
           test -f smoke/LICENSE.txt
-          smoke/plume version
+          smoke/plumekit version
           printf '@let title = "Hello"\n<h1>{ title }</h1>\n' > smoke/sample.plume
-          smoke/plume check smoke/sample.plume
-          smoke/plume format --stdin < smoke/sample.plume > smoke/formatted.plume
+          smoke/plumekit check smoke/sample.plume
+          smoke/plumekit format --stdin < smoke/sample.plume > smoke/formatted.plume
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.arch }}-binary
-          path: plume-*-linux-${{ matrix.arch }}.tar.gz
+          path: plumekit-*-linux-${{ matrix.arch }}.tar.gz
 
   macos:
     name: macOS binary (${{ matrix.arch }})
@@ -140,13 +154,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Check tag matches Plume version
+      - name: Check tag matches PlumeKit version
         run: |
           VERSION="$(sed -n 's/.*current = "\(.*\)".*/\1/p' Sources/Plume/Core/PlumeVersion.swift)"
           if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match Plume version $VERSION"
+            echo "Tag $GITHUB_REF_NAME does not match PlumeKit version $VERSION"
             exit 1
           fi
+
+      - name: Install Swift 6.3.2
+        run: |
+          curl -fsSL https://download.swift.org/swift-6.3.2-release/xcode/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE-osx.pkg -o /tmp/swift.pkg
+          sudo installer -pkg /tmp/swift.pkg -target /
+          echo "/Library/Developer/Toolchains/swift-6.3.2-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
 
       - name: Build
         run: swift build -c release
@@ -154,26 +174,26 @@ jobs:
       - name: Package
         run: |
           mkdir -p artifact
-          cp .build/release/plume artifact/plume
+          cp .build/release/plumekit artifact/plumekit
           cp LICENSE.txt artifact/LICENSE.txt
-          tar -C artifact -czf plume-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.tar.gz plume LICENSE.txt
+          tar -C artifact -czf plumekit-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.tar.gz plumekit LICENSE.txt
 
       - name: Smoke test archive
         run: |
           mkdir -p smoke
-          tar -xzf plume-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.tar.gz -C smoke
-          test -x smoke/plume
+          tar -xzf plumekit-${GITHUB_REF_NAME}-macos-${{ matrix.arch }}.tar.gz -C smoke
+          test -x smoke/plumekit
           test -f smoke/LICENSE.txt
-          smoke/plume version
+          smoke/plumekit version
           printf '@let title = "Hello"\n<h1>{ title }</h1>\n' > smoke/sample.plume
-          smoke/plume check smoke/sample.plume
-          smoke/plume format --stdin < smoke/sample.plume > smoke/formatted.plume
+          smoke/plumekit check smoke/sample.plume
+          smoke/plumekit format --stdin < smoke/sample.plume > smoke/formatted.plume
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}-binary
-          path: plume-*-macos-${{ matrix.arch }}.tar.gz
+          path: plumekit-*-macos-${{ matrix.arch }}.tar.gz
 
   editors:
     name: Editor extensions
@@ -275,8 +295,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum *.tar.gz *.vsix *.zip > "plume-${GITHUB_REF_NAME}-SHA256SUMS"
-          sha256sum -c "plume-${GITHUB_REF_NAME}-SHA256SUMS"
+          sha256sum *.tar.gz *.vsix *.zip > "plumekit-${GITHUB_REF_NAME}-SHA256SUMS"
+          sha256sum -c "plumekit-${GITHUB_REF_NAME}-SHA256SUMS"
 
       - name: Create release
         run: gh release create "$GITHUB_REF_NAME" artifacts/*.tar.gz artifacts/*.vsix artifacts/*.zip artifacts/*-SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

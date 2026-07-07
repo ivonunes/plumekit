@@ -110,7 +110,9 @@ extension PlumeRenderer {
         case "urlDecode":
             return stringify(value).removingPercentEncoding ?? stringify(value)
         case "json":
-            return PlumeSafeHTML(jsonString(value))
+            // Escape `<` (as the compiled @state path does) so JSON embedded in a
+            // <script> can't break out via "</script>".
+            return PlumeSafeHTML(jsonString(value).replacingOccurrences(of: "<", with: "\\u003c"))
         case "slice":
             return slice(
                 value, start: Int(number(argument(evaluated))),

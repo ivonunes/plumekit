@@ -263,7 +263,7 @@ extension PlumeRenderer {
         var declarations = styleDeclarations(from: style).filter {
             !styleProperty($0.property, matches: property)
         }
-        if truthyString(value) {
+        if styleValuePresent(value) {
             declarations.append((property: property, value: value))
         }
         guard !declarations.isEmpty else {
@@ -430,7 +430,21 @@ extension PlumeRenderer {
         return ""
     }
 
+    /// Truthiness for CONDITIONAL attribute helpers (`class:`, `class+=`, `attr?=`,
+    /// `attr:value=`): a numeric 0 is falsy, matching the compiler's typed `Plume.truthy`
+    /// for the common numeric case (`class:active="{count}"` with count 0 adds no class).
+    /// This works on the RENDERED string, so it can't distinguish a numeric 0 from a
+    /// literal String "0"; the compiler treats a String "0" as truthy. NOT for `style:`
+    /// values — see `styleValuePresent`.
     func truthyString(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != "false" && trimmed != "nil"
+            && trimmed != "null" && trimmed != "0" && trimmed != "0.0"
+    }
+
+    /// Whether a `style:` value should be written — only empty/false/nil are skipped;
+    /// `0` is a valid style value (`opacity: 0`, `translate: 0`), so it is kept.
+    func styleValuePresent(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed != "false" && trimmed != "nil" && trimmed != "null"
     }

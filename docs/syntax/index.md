@@ -25,6 +25,11 @@ Host-provided `PlumeSafeHTML` renders as HTML. Ordinary strings are escaped. Use
 <article>{customHTML | raw}</article>
 ```
 
+**Always quote an interpolated attribute value.** Escaping covers text and quoted
+attributes, so `<a href="{url}">` is safe. An *unquoted* value like `<a href={url}>`
+is not: a value with a space could add an attribute of its own. Quote every attribute
+that contains `{...}`.
+
 ## Expressions
 
 Expressions can read values from the context, local variables, loop variables, component arguments, and host functions:
@@ -53,7 +58,9 @@ Comparisons and boolean operators work in conditionals and bindings:
 <button disabled?="{items.size == 0}">Continue</button>
 ```
 
-Note that `!` negates the whole expression that follows it, so `!a == b` evaluates as `!(a == b)`. To compare a negated value, bind it first: `@let isHidden = !visible` and then `isHidden == true`.
+Operators follow Swift's precedence: prefix `!` binds tightest, then `??`, then
+comparisons, then `&&`, then `||`. So `!a == b` evaluates as `(!a) == b`. (This
+changed in Plume 2.0; earlier versions parsed it as `!(a == b)`.)
 
 Use ternaries for small inline choices:
 
@@ -87,6 +94,26 @@ Use `@if`, `else if`, and `else`:
   <h1>Untitled</h1>
 }
 ```
+
+Bind an optional with Swift-style `@if let`; the name is in scope for the body:
+
+```plume
+@if let author = post.author {
+  <p>By {author.name}</p>
+} else {
+  <p>Anonymous</p>
+}
+```
+
+Coalesce a missing value with `??` (only nil/null falls back; an empty string is
+a value, as in Swift). It binds tighter than comparison and is right-associative:
+
+```plume
+<title>{post.title ?? site.title ?? "Untitled"}</title>
+```
+
+`@if let` and `??` mean the same thing whether a template runs through the
+interpreting renderer or the compiling back-end.
 
 ## Loops
 
@@ -142,10 +169,10 @@ Filters transform values:
 
 The most common filters:
 
-- `default(value)` — substitute for missing or empty values. The number `0` is kept.
-- `date(format)` — format a date.
-- `join(separator)`, `sort(field)`, `where(field, value)`, `map(field)` — work with arrays.
-- `upcase`, `downcase`, `truncate(length)`, `slugify` — transform strings.
+- `default(value)`: substitute for missing or empty values. The number `0` is kept.
+- `date(format)`: format a date.
+- `join(separator)`, `sort(field)`, `where(field, value)`, `map(field)`: work with arrays.
+- `upcase`, `downcase`, `truncate(length)`, `slugify`: transform strings.
 
 See [Filters](filters.md) for the complete reference, covering every string, array, number, date, and output filter.
 

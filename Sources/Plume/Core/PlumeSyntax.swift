@@ -10,6 +10,11 @@ struct PlumeComponent {
 struct PlumeParameter {
     var name: String
     var defaultExpression: String?
+    /// The Swift type named for the compiling back-end, e.g. `Post`, `[Post]`,
+    /// `User?`. `nil` for templates that target only the interpreting renderer,
+    /// which ignores the annotation. Member-level checking of the type is
+    /// deferred to `swiftc` against the generated Swift, not reimplemented here.
+    var typeAnnotation: String?
 }
 
 struct PlumeArgument {

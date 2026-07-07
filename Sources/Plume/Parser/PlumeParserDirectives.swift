@@ -163,6 +163,8 @@ extension PlumeParser {
         var viewTransitions = true
         var scroll = "top"
         var minimumDuration = 0
+        var progressBar = true
+        var progressBarDelay = 500
 
         if index < source.endIndex, source[index] == "(" {
             let arguments = try readParenthesizedExpressions()
@@ -207,6 +209,22 @@ extension PlumeParser {
                             at: context)
                     }
                     minimumDuration = value
+                case "progressBar":
+                    if value == "true" {
+                        progressBar = true
+                    } else if value == "false" {
+                        progressBar = false
+                    } else {
+                        throw error(
+                            "@navigation progressBar must be true or false.", at: context)
+                    }
+                case "progressBarDelay":
+                    guard let value = Int(value), value >= 0 else {
+                        throw error(
+                            "@navigation progressBarDelay must be a non-negative integer.",
+                            at: context)
+                    }
+                    progressBarDelay = value
                 default:
                     throw error("Unknown @navigation argument \(label).", at: context)
                 }
@@ -227,7 +245,8 @@ extension PlumeParser {
             PlumeNavigationDeclaration(
                 resource: PlumeNavigationResource(
                     root: root, viewTransitions: viewTransitions, scroll: scroll,
-                    minimumDuration: minimumDuration, hooks: hooks),
+                    minimumDuration: minimumDuration, progressBar: progressBar,
+                    progressBarDelay: progressBarDelay, hooks: hooks),
                 context: context
             ))
     }

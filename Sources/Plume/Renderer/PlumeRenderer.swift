@@ -77,6 +77,15 @@ struct PlumeRenderer {
                 }
             case .conditional(let condition, let body, let alternate, let context):
                 output.append(try located(context) {
+                    // `@if let name = expr` binds `name` for the body when the
+                    // value is non-nil (Swift optional-binding semantics).
+                    if let binding = PlumeConditionParsing.optionalBinding(in: condition) {
+                        let value = try evaluate(binding.expression, context: context)
+                        guard !isNilValue(value) else { return try render(alternate) }
+                        scopes.append([binding.name: value as Any])
+                        defer { scopes.removeLast() }
+                        return try render(body)
+                    }
                     let passed = try truthy(evaluate(condition, context: context))
                     return try render(passed ? body : alternate)
                 })

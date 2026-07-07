@@ -5,6 +5,10 @@ struct PlumeParser {
     let sourceName: String?
     var index: String.Index
     let lineStarts: [String.Index]
+    private var nestingDepth = 0
+    /// Cap structural nesting so a pathologically deep template can't overflow the build
+    /// tool's stack — a clean error beats a crash. Far deeper than any real template.
+    private static let maxNestingDepth = 256
 
     init(_ source: String, sourceName: String? = nil) {
         self.source = source
@@ -27,6 +31,11 @@ struct PlumeParser {
     }
 
     mutating func parseNodes(untilClosingBrace: Bool) throws -> (nodes: [PlumeNode], closed: Bool) {
+        nestingDepth += 1
+        defer { nestingDepth -= 1 }
+        guard nestingDepth <= Self.maxNestingDepth else {
+            throw error("Template nested too deeply (over \(Self.maxNestingDepth) levels).")
+        }
         var nodes: [PlumeNode] = []
         var text = ""
         var textBraceDepth = 0
@@ -66,6 +75,19 @@ struct PlumeParser {
             if shouldParseDirective("@content", allowingBlockBody: false) {
                 flushText()
                 nodes.append(try parseContent())
+                continue
+            }
+            if shouldParseCSRFDirective() {
+                flushText()
+                let context = sourceContext(at: index)
+                advance(by: "@csrf".count)
+                // Desugar to a hidden input carrying the request's CSRF token, so the
+                // form passes `csrfProtection()`. The token is ambient (the framework
+                // binds it per request), so nothing needs to be threaded through the
+                // view or its handler.
+                nodes.append(.text("<input type=\"hidden\" name=\"_csrf\" value=\""))
+                nodes.append(.output("RenderContext.currentCSRFToken", context))
+                nodes.append(.text("\">"))
                 continue
             }
             if starts(with: "@state ") {
@@ -108,7 +130,13 @@ struct PlumeParser {
             }
 
             let character = source[index]
-            if character == "{", shouldParseOutputExpression() {
+            if character == "{", shouldParseOutputExpression(text) {
+                // Escaping neutralises `<`/`>`/`"`/`'` but not spaces, so an interpolation
+                // in an UNQUOTED attribute value (`<a href={url}>`) could inject an
+                // attribute. Require quotes, where escaping fully protects the value.
+                if endsInUnquotedAttribute(text) {
+                    throw error("Quote an interpolated attribute value: write attr=\"{...}\", not attr={...}.")
+                }
                 flushText()
                 let context = sourceContext(at: index)
                 advance()

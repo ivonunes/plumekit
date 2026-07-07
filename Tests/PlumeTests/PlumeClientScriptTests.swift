@@ -39,6 +39,35 @@ final class PlumeClientScriptTests: XCTestCase {
         XCTAssertEqual(js.components(separatedBy: "function __plumeClasses").count, 2)
     }
 
+    func testTokenRewritesDoNotTouchStringLiterals() throws {
+        let js = try PlumeClientScriptCompiler.compile("""
+        let label = page.query("#label")
+        on "#go".click {
+          label.setText("Status: nil, page.width here")
+        }
+        """, sourceName: "scripts/s.plume")
+        // The literal text must survive: `nil`→`null` / `page.width`→`window.innerWidth`
+        // rewrites apply to code, not string contents.
+        XCTAssertTrue(js.contains(#""Status: nil, page.width here""#))
+        XCTAssertFalse(js.contains("Status: null"))
+        XCTAssertFalse(js.contains("Status: nil, window.innerWidth"))
+    }
+
+    func testStringInterpolationBecomesTemplateLiteral() throws {
+        let js = try PlumeClientScriptCompiler.compile("""
+        let label = page.query("#label")
+        var count = 0
+        on "#go".click {
+          label.setText("Count: \\(count) at \\(page.width)px")
+          label.setText("no interpolation")
+        }
+        """, sourceName: "scripts/s.plume")
+        // \(expr) → ${expr}, and the interpolated expr is itself transformed (page.width).
+        XCTAssertTrue(js.contains("`Count: ${count} at ${window.innerWidth}px`"))
+        // A literal without interpolation keeps its quotes (no needless template literal).
+        XCTAssertTrue(js.contains(#""no interpolation""#))
+    }
+
     func testCoercionParenthesizesLogicalExpressions() throws {
         let js = try PlumeClientScriptCompiler.compile("""
         let label = page.query("#label")

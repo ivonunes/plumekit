@@ -104,6 +104,7 @@ extension PlumeRenderer {
     )? {
         var quote: Character?
         var parenDepth = 0
+        var bracketDepth = 0   // don't split on a `?`/`:` inside an array literal `[…]`
         var question: String.Index?
         var index = expression.startIndex
         while index < expression.endIndex {
@@ -122,9 +123,13 @@ extension PlumeRenderer {
                 parenDepth += 1
             } else if character == ")" {
                 parenDepth = max(0, parenDepth - 1)
-            } else if character == "?", parenDepth == 0 {
+            } else if character == "[" {
+                bracketDepth += 1
+            } else if character == "]" {
+                bracketDepth = max(0, bracketDepth - 1)
+            } else if character == "?", parenDepth == 0, bracketDepth == 0 {
                 question = index
-            } else if character == ":", parenDepth == 0, let question {
+            } else if character == ":", parenDepth == 0, bracketDepth == 0, let question {
                 let condition = String(expression[..<question]).trimmingCharacters(
                     in: .whitespacesAndNewlines)
                 let trueExpressionStart = expression.index(after: question)
@@ -143,6 +148,7 @@ extension PlumeRenderer {
     func infix(_ expression: String, operatorText: String) -> (left: String, right: String)? {
         var quote: Character?
         var parenDepth = 0
+        var bracketDepth = 0   // don't split on an operator inside an array literal `[…]`
         var index = expression.startIndex
         while index < expression.endIndex {
             let character = expression[index]
@@ -166,7 +172,17 @@ extension PlumeRenderer {
                 index = expression.index(after: index)
                 continue
             }
-            if parenDepth == 0, expression[index...].hasPrefix(operatorText) {
+            if character == "[" {
+                bracketDepth += 1
+                index = expression.index(after: index)
+                continue
+            }
+            if character == "]" {
+                bracketDepth = max(0, bracketDepth - 1)
+                index = expression.index(after: index)
+                continue
+            }
+            if parenDepth == 0, bracketDepth == 0, expression[index...].hasPrefix(operatorText) {
                 let left = String(expression[..<index]).trimmingCharacters(
                     in: .whitespacesAndNewlines)
                 let rightStart = expression.index(index, offsetBy: operatorText.count)

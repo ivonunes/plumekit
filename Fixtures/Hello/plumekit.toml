@@ -1,0 +1,39 @@
+# PlumeKit project manifest: capabilities, per-target driver selection, and build
+# config. Change a value + rebuild to relink a different adapter set with NO app-code
+# change. `plumekit` generates the composition root and the typed Bindings from this.
+
+# Capabilities the app uses. Using one not declared here is a COMPILE error
+# (the generated Bindings has no accessor for it).
+[capabilities]
+kv = true
+database = true
+storage = true
+cache = true
+queue = true
+http = true
+secrets = true
+
+# `plumekit build` (no --target) builds `default`; `--target all` builds every entry
+# in `targets`. `--target <name>` overrides both.
+[build]
+default = "cloudflare"
+targets = ["cloudflare", "aws"]
+
+[targets.native]
+database = "sqlite"      # sqlite | postgres  (postgres proven live; see docs/portability.md)
+storage  = "filesystem"  # filesystem | memory | s3
+
+# Cloudflare adapters (D1 / R2 / KV) are configured in wrangler.toml.
+[targets.cloudflare]
+database = "d1"
+storage  = "r2"
+
+# AWS profile: links the AWS adapter set (S3/SQS/SSM/DynamoDB/SES + RDS Postgres) for
+# the Lambda runtime. Selecting it swaps the target with zero app-code change; config
+# comes from the neutral providers (env / SSM). See docs/aws.md.
+[targets.aws]
+database = "postgres"   # RDS Postgres (SQLDatabase)
+storage  = "s3"         # S3
+queue    = "sqs"        # SQS
+secrets  = "ssm"        # SSM Parameter Store
+channel  = "apigateway" # API Gateway WebSockets + DynamoDB

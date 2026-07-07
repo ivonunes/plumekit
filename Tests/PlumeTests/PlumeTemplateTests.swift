@@ -335,7 +335,7 @@ final class PlumeTemplateTests: XCTestCase {
 
     func testSupportsDeclarativeNavigation() throws {
         let template = try PlumeTemplate("""
-        @navigation(root: "main", viewTransitions: true, scroll: "top", minimumDuration: 250) {
+        @navigation(root: "main", viewTransitions: true, scroll: "top", minimumDuration: 250, progressBar: false, progressBarDelay: 300) {
           on:beforeSwap {
             page.addClass("is-leaving")
           }
@@ -355,6 +355,8 @@ final class PlumeTemplateTests: XCTestCase {
         XCTAssertTrue(navigation.viewTransitions)
         XCTAssertEqual(navigation.scroll, "top")
         XCTAssertEqual(navigation.minimumDuration, 250)
+        XCTAssertFalse(navigation.progressBar)
+        XCTAssertEqual(navigation.progressBarDelay, 300)
         XCTAssertEqual(navigation.hooks, [
             PlumeNavigationHook(name: "beforeSwap", actions: [#"page.addClass("is-leaving")"#]),
             PlumeNavigationHook(name: "afterSwap", actions: [#"page.removeClass("is-leaving")"#])
@@ -618,4 +620,12 @@ final class PlumeTemplateTests: XCTestCase {
             XCTAssertTrue(String(describing: error).contains("totallyUnknownFilter"))
         }
     }
+
+    func testForloopSizeIsLoopLengthNotMetadataKeyCount() throws {
+        let template = try PlumeTemplate("@for item in items {[{forloop.size}/{forloop.count}]}")
+        let html = try template.render(["items": ["a", "b", "c"]])
+        XCTAssertTrue(html.contains("[3/3]"))     // the loop length
+        XCTAssertFalse(html.contains("7"))         // not the metadata dict's key count
+    }
+
 }

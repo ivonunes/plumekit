@@ -1,7 +1,30 @@
 import Foundation
 
 extension PlumeParser {
-    func shouldParseOutputExpression() -> Bool {
+    /// True when the literal so far ends inside an open tag with an unquoted attribute
+    /// value about to be interpolated (`<a href=` → the next `{...}` is unquoted). Used
+    /// to reject that form, since escaping can't make an unquoted value safe.
+    func endsInUnquotedAttribute(_ text: String) -> Bool {
+        let bytes = Array(text.utf8)
+        var lastLt = -1, lastGt = -1
+        for i in bytes.indices {
+            if bytes[i] == 0x3C { lastLt = i } else if bytes[i] == 0x3E { lastGt = i }
+        }
+        guard lastLt > lastGt else { return false }   // not inside an open tag
+        var quote: UInt8 = 0
+        var lastSignificant: UInt8 = 0
+        var i = lastLt + 1
+        while i < bytes.count {
+            let b = bytes[i]
+            if quote != 0 { if b == quote { quote = 0 } }
+            else if b == 0x22 || b == 0x27 { quote = b }
+            if b != 0x20 && b != 0x09 && b != 0x0A && b != 0x0D { lastSignificant = b }
+            i += 1
+        }
+        return quote == 0 && lastSignificant == 0x3D   // ends with `=` outside a quote
+    }
+
+    func shouldParseOutputExpression(_ text: String) -> Bool {
         let next = source.index(after: index)
         guard next < source.endIndex else { return false }
         let character = source[next]
@@ -19,7 +42,38 @@ extension PlumeParser {
         }
         guard index > source.startIndex else { return true }
         let previous = source[source.index(before: index)]
-        return !(previous.isLetter || previous.isNumber || previous == "_" || previous == "-" || previous == "." || previous == "#" || previous == ")" || previous == "]")
+        // `-` is NOT a blocker: `id="{prefix}-{n}"` is common HTML-id composition
+        // and the hyphen never legitimately precedes a block brace in CSS/JS.
+        if !(previous.isLetter || previous.isNumber || previous == "_" || previous == "." || previous == "#" || previous == ")" || previous == "]") {
+            return true
+        }
+        // The `{` is glued to a word character. That guard exists to keep CSS/JS
+        // block braces (`selector{…}`, `){`) in raw <script>/<style> bodies and
+        // prose literal — but a `{` inside a QUOTED ATTRIBUTE VALUE is
+        // unambiguously an interpolation (`class="app-header{extraClass}"`), where
+        // such braces never occur. So relax the guard there.
+        return insideQuotedAttributeValue(text)
+    }
+
+    /// Whether `text` currently sits inside an OPEN quoted attribute value of an
+    /// open tag (`<a class="…␣` with the quote still open). Mirrors the tag/quote
+    /// scan in `endsInUnquotedAttribute`.
+    func insideQuotedAttributeValue(_ text: String) -> Bool {
+        let bytes = Array(text.utf8)
+        var lastLt = -1, lastGt = -1
+        for i in bytes.indices {
+            if bytes[i] == 0x3C { lastLt = i } else if bytes[i] == 0x3E { lastGt = i }
+        }
+        guard lastLt > lastGt else { return false }   // not inside an open tag
+        var quote: UInt8 = 0
+        var i = lastLt + 1
+        while i < bytes.count {
+            let b = bytes[i]
+            if quote != 0 { if b == quote { quote = 0 } }
+            else if b == 0x22 || b == 0x27 { quote = b }
+            i += 1
+        }
+        return quote != 0   // still inside an open quoted attribute value
     }
 
     private func shouldParseQuotedOutputExpression() -> Bool {
@@ -88,6 +142,14 @@ extension PlumeParser {
     func shouldParseSlotDirective() -> Bool {
         guard source[index...].hasPrefix("@slot") else { return false }
         let after = source.index(index, offsetBy: "@slot".count)
+        guard after < source.endIndex else { return true }
+        let character = source[after]
+        return !(character.isLetter || character.isNumber || character == "_" || character == "-")
+    }
+
+    func shouldParseCSRFDirective() -> Bool {
+        guard source[index...].hasPrefix("@csrf") else { return false }
+        let after = source.index(index, offsetBy: "@csrf".count)
         guard after < source.endIndex else { return true }
         let character = source[after]
         return !(character.isLetter || character.isNumber || character == "_" || character == "-")

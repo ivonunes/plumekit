@@ -36,6 +36,32 @@ function activate(context) {
       }
     });
   }));
+
+  // PlumeKit framework commands — run the CLI (preferring the ./plumekit wrapper) in
+  // an integrated terminal.
+  const frameworkCommands = {
+    "plumekit.dev": ["dev"],
+    "plumekit.serve": ["serve"],
+    "plumekit.build": ["build"],
+    "plumekit.deploy": ["deploy"],
+    "plumekit.migrate": ["migrate"],
+    "plumekit.routes": ["routes"],
+    "plumekit.doctor": ["doctor"]
+  };
+  for (const id of Object.keys(frameworkCommands)) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(id, () => runPlumekit(frameworkCommands[id])));
+  }
+  context.subscriptions.push(vscode.commands.registerCommand("plumekit.generate", async () => {
+    const kind = await vscode.window.showQuickPick(
+      ["resource", "auth", "model", "controller", "migration", "view", "middleware", "job", "seeder"],
+      { placeHolder: "Generate…" });
+    if (!kind) return;
+    if (kind === "auth") { runPlumekit(["generate", "auth"]); return; }
+    const name = await vscode.window.showInputBox({ prompt: `Name (and fields) for the ${kind}` });
+    if (!name) return;
+    runPlumekit(["generate", kind, ...name.trim().split(/\s+/)]);
+  }));
 }
 
 async function deactivate() {
@@ -70,15 +96,22 @@ function resolveToolCommand(workspace) {
     const toolPath = configured.trim();
     return path.basename(toolPath) === "inkstead-writer"
       ? writerCommand(toolPath, toolPath)
-      : plumeCommand(toolPath, toolPath);
+      : plumekitCommand(toolPath, toolPath);
   }
 
-  const localWriter = path.join(workspace, "inkstead-writer");
-  if (fs.existsSync(localWriter)) {
-    return writerCommand(localWriter, "./inkstead-writer");
+  if (workspace) {
+    const localWriter = path.join(workspace, "inkstead-writer");
+    if (fs.existsSync(localWriter)) {
+      return writerCommand(localWriter, "./inkstead-writer");
+    }
+    // Prefer the project's committed ./plumekit wrapper — it pins the CLI version.
+    const localPlumekit = path.join(workspace, "plumekit");
+    if (fs.existsSync(localPlumekit)) {
+      return plumekitCommand(localPlumekit, "./plumekit");
+    }
   }
 
-  return plumeCommand("plume", "plume");
+  return plumekitCommand("plumekit", "plumekit");
 }
 
 function writerCommand(path, display) {
@@ -90,13 +123,31 @@ function writerCommand(path, display) {
   };
 }
 
-function plumeCommand(path, display) {
+function plumekitCommand(path, display) {
   return {
     path,
     display,
     languageServerArgs: ["language-server"],
     checkArgs: ["check"]
   };
+}
+
+// The `plumekit` executable to run framework commands with — the project's committed
+// ./plumekit wrapper when present, else `plumekit` on PATH.
+function resolvePlumekitCli(workspace) {
+  if (workspace && fs.existsSync(path.join(workspace, "plumekit"))) return "./plumekit";
+  return "plumekit";
+}
+
+let plumekitTerminal;
+function runPlumekit(args) {
+  const workspace = workspaceFolder();
+  const cli = resolvePlumekitCli(workspace);
+  if (!plumekitTerminal || plumekitTerminal.exitStatus !== undefined) {
+    plumekitTerminal = vscode.window.createTerminal({ name: "PlumeKit", cwd: workspace });
+  }
+  plumekitTerminal.show();
+  plumekitTerminal.sendText(`${cli} ${args.join(" ")}`);
 }
 
 function workspaceFolder() {
@@ -110,8 +161,8 @@ function workspaceFolder() {
 }
 
 function showCommandError(command, fallback) {
-  if (command.display === "plume") {
-    vscode.window.showErrorMessage(`${fallback} Install the Plume CLI, or set plume.toolPath to a plume or inkstead-writer executable.`);
+  if (command.display === "plumekit") {
+    vscode.window.showErrorMessage(`${fallback} Install the PlumeKit CLI, or set plume.toolPath to a plumekit executable.`);
   } else {
     vscode.window.showErrorMessage(`${fallback} See the Plume output for details.`);
   }

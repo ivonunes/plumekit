@@ -18,15 +18,15 @@
 
 ## Declarations
 
-- `let name = value` — a constant.
-- `var name = value` — a mutable variable.
+- `let name = value`: a constant.
+- `var name = value`: a mutable variable.
 
 Values can be strings, numbers, booleans, element queries, and expressions built from them.
 
 ## Queries
 
-- `page.query(selector)` — the first matching element.
-- `page.queryAll(selector)` — all matching elements, for loops.
+- `page.query(selector)`: the first matching element.
+- `page.queryAll(selector)`: all matching elements, for loops.
 
 ```plume
 @script {
@@ -69,9 +69,9 @@ The target can be a selector string, a queried element, or `page`. Inside a hand
 
 ## Page Values And Actions
 
-- `page.addClass`, `page.removeClass`, `page.toggleClass` — class helpers on the document element.
-- `page.scrollTo(...)` and `page.scrollToTop(...)` — scrolling helpers.
-- `page.scrollY` and `page.width` — read-only values for conditions.
+- `page.addClass`, `page.removeClass`, `page.toggleClass`: class helpers on the document element.
+- `page.scrollTo(...)` and `page.scrollToTop(...)`: scrolling helpers.
+- `page.scrollY` and `page.width`: read-only values for conditions.
 
 ## Control Flow
 

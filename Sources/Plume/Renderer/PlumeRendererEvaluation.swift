@@ -103,13 +103,22 @@ extension PlumeRenderer {
             if !left { return false }
             return truthy(try evaluate(infix.right))
         }
-        if trimmed.hasPrefix("!") {
-            return !truthy(try evaluate(String(trimmed.dropFirst())))
-        }
         if let comparison = comparison(in: trimmed) {
             return try compare(
                 left: evaluate(comparison.left), op: comparison.op,
                 right: evaluate(comparison.right))
+        }
+        // Nil-coalescing `a ?? b`: like Swift, only nil/null coalesces (an empty
+        // string is a value). Higher precedence than comparison, right-associative
+        // (the right operand recurses). Identical to the compiling back-end's `??`.
+        if let coalesce = infix(trimmed, operatorText: "??") {
+            let left = try evaluate(coalesce.left)
+            return isNilValue(left) ? try evaluate(coalesce.right) : left
+        }
+        // Prefix `!` binds tighter than comparison and `??` (Swift precedence), so
+        // it is recognised after them: `!a == b` is `(!a) == b`.
+        if trimmed.hasPrefix("!") {
+            return !truthy(try evaluate(String(trimmed.dropFirst())))
         }
         if let value = try evaluateMethodChain(trimmed) {
             return value

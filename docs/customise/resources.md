@@ -137,6 +137,8 @@ Plume checks static asset references where the host provides enough information.
 
 Use `asset()` for files you want to reference from attributes, such as favicons, downloads, fonts, and images that do not need generated markup.
 
+`asset()` works in **both** the interpreter and the **compiled** path. In a compiled template it is resolved **at build time** to a baked URL string literal (no runtime lookup in the Wasm build), so the argument must be a **string literal**. In PlumeKit it resolves to the content-hashed Plume bundle for the framework's own files (`asset("app.js")` → `/app.<hash>.js`, `asset("app.css")` → `/app.<hash>.css`) and passes your own `Public/` files through by path (`asset("logo.png")` → `/logo.png`).
+
 ## Images
 
 Use `@image` when the host supports image generation:
@@ -167,4 +169,4 @@ Common arguments:
 
 Use `@image` when you want the host to produce the `<img>` element or add image metadata. Use `asset()` when you only need a URL.
 
-Inkstead Writer uses `asset()`, `@image`, `@style`, and `@script` to emit fingerprinted resources under `/assets/plume/`.
+A host uses `asset()`, `@image`, `@style`, and `@script` to emit fingerprinted resources, typically under a path such as `/assets/plume/`.

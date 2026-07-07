@@ -43,25 +43,15 @@ extension PlumeRenderer {
     }
 
     func scopeID(for declaration: PlumeStyleDeclaration) -> String {
-        let key = [
-            declaration.sourceName ?? "",
-            declaration.context.map { "\($0.line):\($0.column)" } ?? "",
-            declaration.css ?? "",
-            declaration.file ?? "",
-        ].joined(separator: "|")
-        return "plume-\(stableHash(key))"
+        PlumeScope.styleScope(
+            sourceName: declaration.sourceName, context: declaration.context,
+            css: declaration.css, file: declaration.file)
     }
 
     func scriptScopeID(for declaration: PlumeScriptDeclaration) -> String {
-        let key = [
-            "script",
-            declaration.sourceName ?? "",
-            declaration.context.map { "\($0.line):\($0.column)" } ?? "",
-            declaration.js ?? "",
-            declaration.file ?? "",
-            declaration.language.rawValue,
-        ].joined(separator: "|")
-        return "plume-\(stableHash(key))"
+        PlumeScope.scriptScope(
+            sourceName: declaration.sourceName, context: declaration.context,
+            js: declaration.js, file: declaration.file, language: declaration.language)
     }
 
     func addScopeAttributes(_ html: String, scopes: [String]) -> String {

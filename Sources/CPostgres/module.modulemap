@@ -1,0 +1,5 @@
+module CPostgres {
+    header "shim.h"
+    link "pq"
+    export *
+}

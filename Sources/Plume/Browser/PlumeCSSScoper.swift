@@ -68,23 +68,33 @@ public enum PlumeCSSScoper {
             core.removeSubrange(pseudoElementRange)
         }
 
+        // The scope attaches to the KEY compound (the subject — the part after the last
+        // top-level combinator), before that compound's first pseudo-class. So
+        // `.menu:hover .item` scopes `.item`, not `.menu`.
         var depth = 0
         var quote: Character?
         var insertion = core.endIndex
-        var cursor = core.startIndex
+        var cursor = keyCompoundStart(in: core)
         while cursor < core.endIndex {
             let character = core[cursor]
             if let quoteCharacter = quote {
+                if character == "\\" {
+                    cursor = core.index(after: cursor)
+                    if cursor < core.endIndex { cursor = core.index(after: cursor) }
+                    continue
+                }
                 if character == quoteCharacter { quote = nil }
                 cursor = core.index(after: cursor)
                 continue
             }
-            if character == "\"" || character == "'" {
-                quote = character
+            if character == "\\" {                       // escaped char in an identifier (`.foo\:bar`)
                 cursor = core.index(after: cursor)
+                if cursor < core.endIndex { cursor = core.index(after: cursor) }
                 continue
             }
-            if character == "(" || character == "[" {
+            if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "(" || character == "[" {
                 depth += 1
             } else if character == ")" || character == "]" {
                 depth = max(0, depth - 1)
@@ -99,20 +109,74 @@ public enum PlumeCSSScoper {
         return String(leading) + core + pseudoElement + String(trailing.reversed())
     }
 
+    /// The start of the key compound selector — after the last top-level combinator
+    /// (whitespace / `>` / `+` / `~`). Combinator characters inside `(...)`/`[...]` or
+    /// strings don't count.
+    private static func keyCompoundStart(in core: String) -> String.Index {
+        var depth = 0
+        var quote: Character?
+        var start = core.startIndex
+        var inCombinator = false
+        var i = core.startIndex
+        while i < core.endIndex {
+            let c = core[i]
+            if let q = quote {
+                if c == "\\" { i = core.index(after: i); if i < core.endIndex { i = core.index(after: i) }; continue }
+                if c == q { quote = nil }
+                i = core.index(after: i); continue
+            }
+            if c == "\\" {                               // escaped char (e.g. `.foo\ bar`) — not a combinator
+                i = core.index(after: i)
+                if i < core.endIndex { i = core.index(after: i) }
+                inCombinator = false
+                continue
+            }
+            if c == "\"" || c == "'" { quote = c; inCombinator = false }
+            else if c == "(" || c == "[" { depth += 1; inCombinator = false }
+            else if c == ")" || c == "]" { depth = max(0, depth - 1); inCombinator = false }
+            else if depth == 0, c == " " || c == "\t" || c == "\n" || c == ">" || c == "+" || c == "~" {
+                inCombinator = true
+            } else {
+                if inCombinator { start = i }
+                inCombinator = false
+            }
+            i = core.index(after: i)
+        }
+        return start
+    }
+
     private static func splitSelectors(_ selectors: String) -> [String] {
         var parts: [String] = []
         var current = ""
         var depth = 0
         var quote: Character?
+        var escaped = false
+        var inComment = false
+        var prev: Character = " "
         for character in selectors {
+            // Preserve comments verbatim but ignore their contents (a `,` inside a
+            // comment must not split the selector list).
+            if inComment {
+                current.append(character)
+                if prev == "*", character == "/" { inComment = false }
+                prev = character
+                continue
+            }
+            if prev == "/", character == "*", quote == nil {
+                current.append(character); inComment = true; prev = character; continue
+            }
             if let quoteCharacter = quote {
                 current.append(character)
-                if character == quoteCharacter { quote = nil }
+                if escaped { escaped = false }             // this char was escaped
+                else if character == "\\" { escaped = true }
+                else if character == quoteCharacter { quote = nil }
+                prev = character
                 continue
             }
             if character == "\"" || character == "'" {
                 quote = character
                 current.append(character)
+                prev = character
                 continue
             }
             if character == "(" || character == "[" {
@@ -126,6 +190,7 @@ public enum PlumeCSSScoper {
             } else {
                 current.append(character)
             }
+            prev = character
         }
         parts.append(current)
         return parts

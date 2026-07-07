@@ -34,11 +34,18 @@ extension PlumeRenderer {
             "first": index == 0,
             "last": index == count - 1,
             "length": count,
+            "size": count,       // `forloop.size`/`forloop.count` = the loop length,
+            "count": count,      // not the metadata dict's key count
         ]
     }
 
     func property(_ name: String, of value: Any?) -> Any? {
         guard let value else { return nil }
+        // An explicit key wins over the size/count-of fallback, so `forloop.size`
+        // resolves to the loop length (and `data.size` to a real "size" field).
+        if let dictionary = value as? [String: Any], let hit = dictionary[name] {
+            return hit
+        }
         if name == "size" || name == "count" {
             if let array = value as? [Any] { return array.count }
             if let dictionary = value as? [String: Any] { return dictionary.count }
@@ -64,6 +71,12 @@ extension PlumeRenderer {
     func argument(_ arguments: [Any?], at index: Int = 0) -> Any? {
         guard arguments.indices.contains(index) else { return nil }
         return arguments[index]
+    }
+
+    /// Whether a value is nil/null — the narrow Swift-`??` sense, where an empty
+    /// string or empty array is still a value (unlike `missing`).
+    func isNilValue(_ value: Any?) -> Bool {
+        value == nil || value is NSNull
     }
 
     func missing(_ value: Any?) -> Bool {

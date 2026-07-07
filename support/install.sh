@@ -1,14 +1,14 @@
 #!/bin/sh
 set -eu
 
-repo="ivonunes/plume"
+repo="ivonunes/plumekit"
 version="latest"
 prefix="/usr/local"
 bin_dir=""
 
 usage() {
     cat <<'USAGE'
-Install Plume.
+Install PlumeKit.
 
 Usage:
   install.sh [--version VERSION] [--prefix PREFIX] [--bin-dir DIR]
@@ -70,7 +70,7 @@ download() {
     elif command_exists wget; then
         wget -qO "$destination" "$url"
     else
-        echo "Plume install requires curl or wget." >&2
+        echo "PlumeKit install requires curl or wget." >&2
         exit 1
     fi
 }
@@ -82,7 +82,7 @@ download_stdout() {
     elif command_exists wget; then
         wget -qO- "$url"
     else
-        echo "Plume install requires curl or wget." >&2
+        echo "PlumeKit install requires curl or wget." >&2
         exit 1
     fi
 }
@@ -148,7 +148,7 @@ latest_version() {
 
 if [ "$version" = "latest" ]; then
     version="$(latest_version)"
-    [ -n "$version" ] || { echo "Could not determine latest Plume release." >&2; exit 1; }
+    [ -n "$version" ] || { echo "Could not determine latest PlumeKit release." >&2; exit 1; }
 fi
 
 case "$version" in
@@ -160,14 +160,14 @@ esac
 
 platform="$(detect_platform)"
 arch="$(detect_arch)"
-archive="plume-$tag-$platform-$arch.tar.gz"
-checksums="plume-$tag-SHA256SUMS"
+archive="plumekit-$tag-$platform-$arch.tar.gz"
+checksums="plumekit-$tag-SHA256SUMS"
 base_url="https://github.com/$repo/releases/download/$tag"
 
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/plume-install.XXXXXX")"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/plumekit-install.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
-echo "Downloading Plume $tag for $platform-$arch..."
+echo "Downloading PlumeKit $tag for $platform-$arch..."
 download "$base_url/$archive" "$tmp/$archive"
 
 download "$base_url/$checksums" "$tmp/SHA256SUMS" || {
@@ -185,7 +185,7 @@ download "$base_url/$checksums" "$tmp/SHA256SUMS" || {
 )
 
 tar -xzf "$tmp/$archive" -C "$tmp"
-install_file "$tmp/plume" "$bin_dir/plume"
+install_file "$tmp/plumekit" "$bin_dir/plumekit"
 
-echo "Installed Plume to $bin_dir/plume"
-"$bin_dir/plume" version
+echo "Installed PlumeKit to $bin_dir/plumekit"
+"$bin_dir/plumekit" version

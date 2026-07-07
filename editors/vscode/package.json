@@ -1,19 +1,19 @@
 {
   "name": "plume",
   "displayName": "Plume",
-  "description": "Language support for Plume templates.",
-  "version": "1.1.0",
+  "description": "Plume template language support, plus PlumeKit project commands (serve, dev, build, deploy, migrate, routes, doctor, generate).",
+  "version": "2.0.0",
   "publisher": "ivonunes",
   "license": "MIT",
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ivonunes/plume"
+    "url": "https://github.com/ivonunes/plumekit"
   },
   "bugs": {
-    "url": "https://github.com/ivonunes/plume/issues"
+    "url": "https://github.com/ivonunes/plumekit/issues"
   },
-  "homepage": "https://inkstead.dev/plume/",
+  "homepage": "https://plumekit.dev",
   "keywords": [
     "plume",
     "templates",
@@ -29,8 +29,7 @@
   ],
   "activationEvents": [
     "onLanguage:plume",
-    "onCommand:plume.restartLanguageServer",
-    "onCommand:plume.checkTheme"
+    "workspaceContains:plumekit.toml"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -42,7 +41,15 @@
       {
         "command": "plume.checkTheme",
         "title": "Plume: Check Templates"
-      }
+      },
+      { "command": "plumekit.dev", "title": "PlumeKit: Dev Server (watch)" },
+      { "command": "plumekit.serve", "title": "PlumeKit: Serve" },
+      { "command": "plumekit.build", "title": "PlumeKit: Build" },
+      { "command": "plumekit.deploy", "title": "PlumeKit: Deploy" },
+      { "command": "plumekit.migrate", "title": "PlumeKit: Migrate" },
+      { "command": "plumekit.routes", "title": "PlumeKit: Show Routes" },
+      { "command": "plumekit.doctor", "title": "PlumeKit: Doctor" },
+      { "command": "plumekit.generate", "title": "PlumeKit: Generate…" }
     ],
     "configuration": {
       "title": "Plume",
@@ -50,7 +57,7 @@
         "plume.toolPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the plume CLI or inkstead-writer launcher. Leave empty to prefer ./inkstead-writer in the workspace, then plume on PATH."
+          "description": "Path to the plumekit CLI. Leave empty to prefer ./plumekit in the workspace, then plumekit on PATH."
         }
       }
     },

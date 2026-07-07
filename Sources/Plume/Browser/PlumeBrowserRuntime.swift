@@ -10,8 +10,11 @@ import Foundation
 /// measurement actions, and declarative navigation configured through
 /// `<script type="application/json" data-plume-navigation>` tags.
 public enum PlumeBrowserRuntime {
-    /// The compiled, dependency-free JavaScript for the browser runtime.
-    public static var javaScript: String { compiled }
+    /// The compiled, dependency-free JavaScript for the browser runtime. This is
+    /// the compiled `data-plume-*` binding/navigation core plus the Hotwire-style
+    /// "drive" layer (stream-envelope `apply`, `visit`, frames, form interception,
+    /// morph) exposed on the public `Plume` global.
+    public static var javaScript: String { compiled + "\n" + driveRuntime }
 
     private static let compiled: String = {
         do {
@@ -23,10 +26,11 @@ public enum PlumeBrowserRuntime {
 
     private static let source = #"""
 func bootPlumeRuntime() {
+  // A page can need the runtime without declaring any @state — @navigation alone
+  // is enough — so a missing state hook boots with empty state instead of
+  // returning early (which would silently disable declarative navigation).
   let stateScript = document.querySelector("script[data-plume-state]");
-  if (!stateScript) return;
-
-  let state = JSON.parse(stateScript.textContent || "{}");
+  let state = JSON.parse(stateScript?.textContent || "{}");
 
   let truthy = func(value) {
     if (value === null || value === undefined) return false;
@@ -427,9 +431,11 @@ func bootPlumeRuntime() {
         viewTransitions: config.viewTransitions ?? merged.viewTransitions ?? true,
         scroll: config.scroll || merged.scroll || "top",
         minimumDuration: config.minimumDuration ?? merged.minimumDuration ?? 0,
+        progressBar: config.progressBar ?? merged.progressBar ?? true,
+        progressBarDelay: config.progressBarDelay ?? merged.progressBarDelay ?? 500,
         hooks
       };
-    }, { root: "body", viewTransitions: true, scroll: "top", minimumDuration: 0, hooks: {} });
+    }, { root: "body", viewTransitions: true, scroll: "top", minimumDuration: 0, progressBar: true, progressBarDelay: 500, hooks: {} });
   };
 
   let navigation = mergeNavigationConfigs(navigationConfigs());
@@ -479,10 +485,24 @@ func bootPlumeRuntime() {
 
   let navigationRoot = func(root = document) { return root.querySelector(navigation?.root || "body"); };
 
+  // Tracked bundle assets (the content-hashed app.css / app.js the server injects
+  // with data-plume-track). If the incoming page's tracked assets differ from the
+  // current page's — a deploy happened between navigations — swapping would leave
+  // stale CSS/JS driving new markup, so do a full page load instead.
+  let trackedAssetKeys = func(root) {
+    return Array.from(root.querySelectorAll("[data-plume-track]"))
+      .map(func(node) { return node.getAttribute("href") || node.getAttribute("src") || ""; })
+      .sort().join("\n");
+  };
+
   let completeNavigationSwap = func(url, nextDocument, options) {
     let currentRoot = navigationRoot();
     let nextRoot = navigationRoot(nextDocument);
     if (!currentRoot || !nextRoot) {
+      window.location.href = url.href;
+      return;
+    }
+    if (trackedAssetKeys(document.head) !== trackedAssetKeys(nextDocument.head)) {
       window.location.href = url.href;
       return;
     }
@@ -495,12 +515,12 @@ func bootPlumeRuntime() {
       let nextNavigation = mergeNavigationConfigs(navigationConfigs(nextDocument));
       if (nextNavigation) navigation = nextNavigation;
       if (options.history) window.history.pushState({}, "", url.href);
-      if (navigation.scroll === "top") window.scrollTo({ top: 0, left: 0 });
+      if ((navigation?.scroll || "top") === "top") window.scrollTo({ top: 0, left: 0 });
       update();
       setupVisibleActions();
       runNavigationHook("afterSwap", detail);
     };
-    if (navigation.viewTransitions && document.startViewTransition) {
+    if ((navigation?.viewTransitions ?? true) && document.startViewTransition) {
       let transition = document.startViewTransition(swap);
       transition.finished.finally(func() { runNavigationHook("complete", detail); });
     } else {
@@ -514,6 +534,9 @@ func bootPlumeRuntime() {
     try {
       let startedAt = performance.now();
       runNavigationHook("start", detail);
+      // The drive layer's progress bar (Plume.progress) covers slow visits; it
+      // reads the navigation config itself, so it no-ops when disabled.
+      window.Plume?.progress?.start?.();
       let response = await fetch(url.href, { headers: { "X-Plume-Navigation": "true" } });
       if (!response.ok) throw new Error(`Navigation failed with status ${response.status}`);
       let html = await response.text();
@@ -523,10 +546,22 @@ func bootPlumeRuntime() {
         await new Promise(func(resolve) { setTimeout(resolve, remaining); });
       }
       completeNavigationSwap(url, nextDocument, options);
+      window.Plume?.progress?.finish?.();
     } catch (error) {
+      window.Plume?.progress?.finish?.();
       runNavigationHook("error", { url: url.href, error });
       window.location.href = url.href;
     }
+  };
+
+  // Expose the full navigation swap to the drive layer (appended after this
+  // script): a top-level form submission or Plume.visit that receives a full
+  // HTML document must behave exactly like a link visit — title/head/state
+  // sync, navigation config re-read, hooks, history — instead of dumping the
+  // response text into the body.
+  window.Plume = window.Plume || {};
+  window.Plume.swapDocument = func(url, nextDocument, options = { history: true }) {
+    completeNavigationSwap(url, nextDocument, options);
   };
 
   let shouldHandleNavigationLink = func(link, event) {

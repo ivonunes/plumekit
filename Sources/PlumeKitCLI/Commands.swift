@@ -1,0 +1,975 @@
+import Foundation
+import Plume
+
+// MARK: - Small helpers
+
+func errorLine(_ message: String) {
+    FileHandle.standardError.write(Data("\(Style.red("plumekit:")) \(message)\n".utf8))
+}
+
+func writeFile(_ contents: String, to path: String) -> Bool {
+    do { try contents.write(toFile: path, atomically: true, encoding: .utf8); return true }
+    catch { errorLine("failed to write \(path): \(error)"); return false }
+}
+
+private func copyFile(_ from: String, to: String) {
+    try? FileManager.default.removeItem(atPath: to)
+    try? FileManager.default.copyItem(atPath: from, toPath: to)
+}
+
+private func absolutePath(_ path: String) -> String {
+    URL(fileURLWithPath: path).standardizedFileURL.path
+}
+
+/// A wrangler-safe project name derived from the directory name.
+private func projectName(_ path: String) -> String {
+    let name = URL(fileURLWithPath: absolutePath(path)).lastPathComponent.lowercased()
+    let cleaned = String(name.map { ($0.isLetter || $0.isNumber || $0 == "-") ? $0 : "-" })
+    return cleaned.isEmpty ? "plumekit-app" : cleaned
+}
+
+/// Locate the PlumeKit framework checkout (the package that owns this CLI), used to
+/// point a generated project's path dependency at the local framework.
+private func deriveFrameworkRoot() -> String? {
+    let exePath = Bundle.main.executableURL?.resolvingSymlinksInPath().path ?? CommandLine.arguments[0]
+    var dir = URL(fileURLWithPath: exePath).deletingLastPathComponent()
+    for _ in 0..<6 {
+        let runtime = dir.appendingPathComponent("runtime/cloudflare/worker.mjs").path
+        let manifest = dir.appendingPathComponent("Package.swift").path
+        if FileManager.default.fileExists(atPath: runtime),
+           FileManager.default.fileExists(atPath: manifest) {
+            return dir.path
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    return nil
+}
+
+/// The framework checkout root, preferring PLUMEKIT_PATH, else derived from the
+/// CLI executable's location. Used to locate runtime/cloudflare.
+func frameworkRoot() -> String? {
+    if let path = ProcessInfo.processInfo.environment["PLUMEKIT_PATH"] {
+        let abs = absolutePath(path)
+        if FileManager.default.fileExists(atPath: abs + "/runtime/cloudflare/worker.mjs") { return abs }
+    }
+    return deriveFrameworkRoot()
+}
+
+/// The single `dependencies:` entry a generated project should use for the merged
+/// PlumeKit package (framework + Plume templating). `name:` pins the identity to
+/// PlumeKit (the repo dir is `plume`).
+private func resolvePlumeKitDependency(explicitPath: String?) -> String {
+    if let path = explicitPath ?? ProcessInfo.processInfo.environment["PLUMEKIT_PATH"] {
+        return ".package(name: \"PlumeKit\", path: \"\(absolutePath(path))\")"
+    }
+    if let root = deriveFrameworkRoot() {
+        return ".package(name: \"PlumeKit\", path: \"\(root)\")"
+    }
+    // Standalone install: depend on the released package, pinned to this CLI's own version
+    // (so the floor can never drift from PlumeVersion).
+    return ".package(url: \"https://github.com/ivonunes/plumekit.git\", from: \"\(PlumeVersion.current)\")"
+}
+
+// MARK: - Plume templates
+
+/// Compile `<project>/Views/*.plume` → `<project>/Sources/App/Generated/*.swift`
+/// before building, so the generated render functions are always fresh. No-op if
+/// there are no templates.
+///
+/// The Plume compiler is **embedded** in this CLI (a library dependency), so no
+/// separate `plume` install is needed — templates are compiled in-process.
+@discardableResult
+func compileTemplates(projectPath: String) -> Int32 {
+    // Views live in Views/ (older projects used Templates/ — still honored).
+    let viewsDir = projectPath + "/Views"
+    let templatesDir = FileManager.default.fileExists(atPath: viewsDir)
+        ? viewsDir : projectPath + "/Templates"
+    guard FileManager.default.fileExists(atPath: templatesDir) else { return 0 }
+    // One compile implementation: delegate to the same path as `plumekit compile`,
+    // which recurses into subfolders and gives generated files unique, collision-proof
+    // names (`posts/Index.plume` → `posts.Index.plume.swift`).
+    // `plumekit compile` builds the asset bundle into Public/ and bakes the asset() calls
+    // itself when it writes into Sources/App/Generated (see runCompile), so this one call
+    // is the whole view pipeline.
+    return PlumeTemplateCommands.run(
+        "compile", options: [templatesDir, "-o", projectPath + "/Sources/App/Generated"])
+}
+
+// MARK: - new
+
+func newCommand(name: String, plumekitPath: String?) -> Int32 {
+    let fileManager = FileManager.default
+    guard !fileManager.fileExists(atPath: name) else {
+        errorLine("'\(name)' already exists")
+        return 1
+    }
+
+    let options = scaffoldOptions()
+    let dependency = resolvePlumeKitDependency(explicitPath: plumekitPath)
+    for file in Templates.projectFiles(name: name, plumeKitDependency: dependency, options: options) {
+        let fullPath = name + "/" + file.path
+        let directory = (fullPath as NSString).deletingLastPathComponent
+        try? fileManager.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        if !writeFile(file.contents, to: fullPath) { return 1 }
+        if file.path == "plumekit" {   // the CLI wrapper must be executable
+            try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fullPath)
+        }
+    }
+
+    // CI workflows, if chosen.
+    if let provider = options.ciProvider,
+       let ciFiles = CITemplates.files(provider: provider, target: options.defaultTarget) {
+        for (filePath, contents) in ciFiles {
+            let fullPath = name + "/" + filePath
+            try? fileManager.createDirectory(atPath: (fullPath as NSString).deletingLastPathComponent,
+                                             withIntermediateDirectories: true)
+            _ = writeFile(contents, to: fullPath)
+        }
+    }
+
+    // Compile the Plume templates now so the new project builds immediately. The
+    // composition root + typed Bindings are produced by the PlumeKitCodegen build
+    // plugin on every `swift build` (so no codegen is committed).
+    _ = compileTemplates(projectPath: name)
+
+    print("✓ Created \(name)/ — a PlumeKit app (with a Plume view)")
+    print("  Routes: \(name)/Sources/App/App.swift  ·  Views: \(name)/Views/")
+    print("")
+    print("Next:")
+    print("  cd \(name)")
+    print("  ./plumekit dev       # serve on http://127.0.0.1:8080, restart on change")
+    print("  ./plumekit build     # build the default target (\(options.defaultTarget))")
+    print("  ./plumekit deploy    # migrate + build + deploy")
+    return 0
+}
+
+/// Gather scaffold options — interactively at a TTY, otherwise sensible defaults.
+private func scaffoldOptions() -> ScaffoldOptions {
+    guard Prompt.isInteractive else { return ScaffoldOptions() }
+    var options = ScaffoldOptions()
+
+    let capNames = ["kv", "database", "storage", "cache", "queue", "http", "secrets"]
+    let picked = Prompt.multiselect("Capabilities?", capNames, preselected: [0])
+    options.capabilities = picked.isEmpty ? ["kv"] : Set(picked.map { capNames[$0] })
+
+    let targets = ["cloudflare", "aws", "native"]
+    let targetLabels = ["cloudflare (Workers)", "aws (Lambda)", "native (standalone server)"]
+    options.defaultTarget = targets[Prompt.select("Default build/deploy target?", targetLabels)]
+    let target = options.defaultTarget
+
+    if options.capabilities.contains("database") {
+        if target == "cloudflare" {
+            // Cloudflare's database is D1 (SQLite). Match it locally so dev and
+            // production run the same engine — no question to ask.
+            options.nativeDatabaseDriver = "sqlite"
+            print(Style.dim("  Using SQLite locally to match Cloudflare D1."))
+        } else {
+            let drivers = ["sqlite", "postgres"]
+            options.nativeDatabaseDriver = drivers[Prompt.select("Native database driver?", drivers)]
+        }
+    }
+
+    // A Dockerfile only matters when you deploy the native server as a container.
+    // Cloudflare (Wasm) and AWS (Lambda zip) don't use one.
+    options.includeDockerfile = target == "native"
+        ? Prompt.confirm("Add a Dockerfile (deploy the standalone server as a container)?")
+        : false
+
+    let ci = ["none", "github", "gitlab", "forgejo"]
+    let choice = ci[Prompt.select("Add CI workflows (test on PR, deploy on push to main)?", ci)]
+    options.ciProvider = choice == "none" ? nil : choice
+    print("")
+    return options
+}
+
+// MARK: - serve
+
+func serveCommand(path: String, host: String, port: UInt16) -> Int32 {
+    loadDotEnv(projectPath: path)
+    // Development mode: the spawned server inherits this and shows the dev error page
+    // when a handler throws. A user-set PLUMEKIT_ENV always wins (overwrite = 0).
+    setenv("PLUMEKIT_ENV", "development", 0)
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    print("→ plumekit serve — building & starting the native server on http://\(host):\(port)")
+    return runInherit("swift", [
+        "run", "--package-path", path, "Server", "--host", host, "--port", String(port),
+    ])
+}
+
+// MARK: - build
+
+func buildCloudflareCommand(path: String, outDir: String = "dist", showNextSteps: Bool = true) -> Int32 {
+    guard let sdk = embeddedWasmSDK() else {
+        errorLine("no Embedded-Swift WebAssembly SDK is installed.")
+        errorLine("Install one (see swift.org's 'Getting Started with Swift SDKs for WebAssembly'):")
+        errorLine("  swift sdk install <…_wasm.artifactbundle URL> --checksum <…>")
+        return 1
+    }
+
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+
+    print("→ Building Worker → WebAssembly with \(sdk)")
+    // Native `String` ops (==, hasPrefix, lowercased, split, Dictionary<String,_>) link in
+    // the guest because PlumeWorker links Swift's Unicode data tables (see Package.swift) —
+    // no build-side plumbing needed here.
+    let buildStatus = runInherit("swift", [
+        "build", "--package-path", path, "--swift-sdk", sdk, "-c", "release",
+        "--product", "Worker",
+        "-Xswiftc", "-Xclang-linker", "-Xswiftc", "-mexec-model=reactor",
+        // Optimize for size, not speed: Cloudflare's module-size limit is a hard deploy
+        // wall, while a Worker request is I/O-bound (DB/KV/network + byte-wise HTML
+        // rendering), so the runtime cost is negligible and a smaller module also
+        // cold-starts faster. ~7% smaller (compressed) on top of wasm-opt's -Oz.
+        "-Xswiftc", "-Osize",
+    ])
+    guard buildStatus == 0 else {
+        errorLine("wasm build failed")
+        return buildStatus
+    }
+
+    let wasmIn = path + "/.build/wasm32-unknown-wasip1/release/Worker.wasm"
+    guard FileManager.default.fileExists(atPath: wasmIn) else {
+        errorLine("expected wasm not found at \(wasmIn)")
+        return 1
+    }
+    let rawSize = fileSize(wasmIn)
+
+    let bundleDir = path + "/" + outDir + "/cloudflare"
+    try? FileManager.default.createDirectory(atPath: bundleDir, withIntermediateDirectories: true)
+    let wasmOut = bundleDir + "/app.wasm"
+
+    if toolExists("wasm-opt") {
+        // -Oz for size, and strip DWARF/producers/target-features custom sections:
+        // SwiftPM's release config compiles with `-g`, and binaryen ≥ v116 *preserves*
+        // (and rewrites) DWARF through -O passes, so without --strip-debug the shipped
+        // wasm carries ~16 MB of debug sections — 5× the actual code — which blows
+        // Cloudflare's compressed module-size limit for no runtime benefit.
+        // Override for special builds (e.g. keep DWARF for profiling) with
+        // PLUMEKIT_WASM_OPT_ARGS, a space-separated wasm-opt argument list.
+        let defaultArgs = ["-Oz", "--strip-debug", "--strip-producers", "--strip-target-features"]
+        let optArgs = ProcessInfo.processInfo.environment["PLUMEKIT_WASM_OPT_ARGS"]
+            .map { $0.split(separator: " ").map(String.init) } ?? defaultArgs
+        print("→ Optimizing: wasm-opt \(optArgs.joined(separator: " "))")
+        if runInherit("wasm-opt", optArgs + [wasmIn, "-o", wasmOut]) != 0 {
+            errorLine("wasm-opt failed; emitting unoptimized wasm")
+            copyFile(wasmIn, to: wasmOut)
+        }
+    } else {
+        errorLine("wasm-opt not found (install binaryen); emitting unoptimized wasm")
+        copyFile(wasmIn, to: wasmOut)
+    }
+    let optSize = fileSize(wasmOut)
+
+    // The JS glue + wrangler config ship EMBEDDED in this binary (generated at build time
+    // from runtime/cloudflare by the PlumeEmbed plugin), so a standalone
+    // install builds Cloudflare bundles with no framework checkout. When a checkout
+    // IS present (framework development), its files win so edits take effect
+    // without regenerating.
+    let name = projectName(path)
+    var workerJS = CloudflareRuntimeEmbedded.workerJS
+    var wranglerTemplate = CloudflareRuntimeEmbedded.wranglerTemplate
+    if let root = frameworkRoot() {
+        let runtimeDir = root + "/runtime/cloudflare"
+        if let checkoutWorker = try? String(contentsOfFile: runtimeDir + "/worker.mjs", encoding: .utf8) {
+            workerJS = checkoutWorker
+        }
+        if let checkoutTemplate = try? String(contentsOfFile: runtimeDir + "/wrangler.toml.template", encoding: .utf8) {
+            wranglerTemplate = checkoutTemplate
+        }
+    }
+    // wrangler.toml is USER-OWNED: build respects a project-root wrangler.toml (so custom
+    // domains, logging/observability, vars, and extra bindings survive rebuilds). On the
+    // first build we generate one there from the template for you to customise; later
+    // builds keep your version. Only worker.mjs (the JSPI glue) is framework-managed.
+    let projectWrangler = path + "/wrangler.toml"
+    let wrangler: String
+    if let existing = try? String(contentsOfFile: projectWrangler, encoding: .utf8) {
+        wrangler = existing.replacingOccurrences(of: "__NAME__", with: name)
+    } else {
+        wrangler = wranglerTemplate.replacingOccurrences(of: "__NAME__", with: name)
+        _ = writeFile(wrangler, to: projectWrangler)
+        print("  wrote wrangler.toml at the project root — customise it (custom domains,")
+        print("  logging, vars, …); future builds keep your version.")
+    }
+    guard writeFile(workerJS, to: bundleDir + "/worker.mjs"),
+          writeFile(wrangler, to: bundleDir + "/wrangler.toml") else {
+        return 1
+    }
+
+    // Copy the app's static files so Cloudflare's [assets] can serve them (the runtime
+    // bundle, styles, images) at the same URL paths the native server serves from Public/.
+    let publicSrc = path + "/Public"
+    var copiedAssets = 0
+    if FileManager.default.fileExists(atPath: publicSrc) {
+        let publicDst = bundleDir + "/public"
+        try? FileManager.default.removeItem(atPath: publicDst)
+        try? FileManager.default.copyItem(atPath: publicSrc, toPath: publicDst)
+        copiedAssets = ((try? FileManager.default.contentsOfDirectory(atPath: publicDst)) ?? []).count
+    }
+
+    let savedPct = rawSize > 0 ? Int((Double(rawSize - optSize) / Double(rawSize)) * 100) : 0
+    print("")
+    print("✓ Cloudflare Worker bundle → \(bundleDir)")
+    print("  worker.mjs    module-worker entry (JSPI host bindings, dependency-free)")
+    print("  app.wasm      \(rawSize) → \(optSize) bytes  (wasm-opt, −\(savedPct)%)")
+    print("  wrangler.toml name = \"\(name)\"")
+    if copiedAssets > 0 {
+        print("  public/       \(copiedAssets) static files (served by Cloudflare [assets])")
+    }
+    // Suppressed under `deploy`, which is already doing the deploy — printing "now run
+    // wrangler deploy" mid-deploy is confusing.
+    if showNextSteps {
+        print("")
+        print("Next:")
+        print("  cd \(bundleDir)")
+        print("  # create a KV namespace and set its id in wrangler.toml, then:")
+        print("  wrangler dev      # serve the Wasm worker locally")
+        print("  wrangler deploy   # deploy (requires a Cloudflare account / login)")
+    }
+    return 0
+}
+
+func buildAWSCommand(path: String, outDir: String = "dist", showNextSteps: Bool = true) -> Int32 {
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+
+    // Lambda runs a Linux binary under the `provided.al2` runtime, whose entrypoint
+    // is a file named `bootstrap`. Cross-build with a static Linux Swift SDK when one
+    // is installed; otherwise build with the host toolchain (fine for LocalStack via a
+    // Linux container / local invoke, but a real Lambda deploy needs the Linux build).
+    let linuxSDK = staticLinuxSDK()
+    var buildArgs = ["build", "--package-path", path, "-c", "release", "--product", "Lambda"]
+    if let linuxSDK { buildArgs += ["--swift-sdk", linuxSDK] }
+    print(Style.cyan("→") + " Building Lambda \(linuxSDK.map { "for \($0)" } ?? "(host toolchain)")")
+    let status = runInherit("swift", buildArgs)
+    guard status == 0 else {
+        errorLine("Lambda build failed.")
+        errorLine("Does this project have a `Lambda` executable target? (see docs/aws.md;")
+        errorLine("the Fixtures/Hello app shows the AWS front-end + [targets.aws] plumekit.toml profile.)")
+        return status
+    }
+
+    var showBinArgs = buildArgs
+    showBinArgs.append("--show-bin-path")
+    let (binStatus, binOut) = captureStdout("swift", showBinArgs)
+    let binDir = binOut.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard binStatus == 0, FileManager.default.fileExists(atPath: binDir + "/Lambda") else {
+        errorLine("couldn't locate the built Lambda binary")
+        return 1
+    }
+
+    let bundleDir = path + "/" + outDir + "/aws"
+    try? FileManager.default.createDirectory(atPath: bundleDir, withIntermediateDirectories: true)
+    let bootstrap = bundleDir + "/bootstrap"
+    copyFile(binDir + "/Lambda", to: bootstrap)
+    runInherit("chmod", ["+x", bootstrap])
+
+    let haveZip = toolExists("zip")
+    if haveZip {
+        // -j keeps `bootstrap` at the archive root, as provided.al2 requires.
+        runInherit("zip", ["-j", "-q", bundleDir + "/function.zip", bootstrap])
+    }
+    _ = writeFile(Templates.awsDeployReadme(name: projectName(path)), to: bundleDir + "/README.md")
+
+    // Copy the app's static files so they're ready to upload to S3 + front with CloudFront
+    // (routing dynamic paths to the Lambda). See the bundle README for the setup.
+    let awsPublicSrc = path + "/Public"
+    var awsAssets = 0
+    if FileManager.default.fileExists(atPath: awsPublicSrc) {
+        let dst = bundleDir + "/public"
+        try? FileManager.default.removeItem(atPath: dst)
+        try? FileManager.default.copyItem(atPath: awsPublicSrc, toPath: dst)
+        awsAssets = ((try? FileManager.default.contentsOfDirectory(atPath: dst)) ?? []).count
+    }
+
+    print("")
+    print(Style.green("✓") + " " + Style.bold("AWS Lambda bundle") + " → \(bundleDir)")
+    print("  bootstrap     provided.al2 entrypoint (\(fileSize(bootstrap)) bytes)")
+    if haveZip { print("  function.zip  deployable archive") }
+    if awsAssets > 0 { print("  public/       \(awsAssets) static files → S3 + CloudFront (see README)") }
+    print("  README.md     env vars + deploy / LocalStack steps")
+    if linuxSDK == nil {
+        print("")
+        print(Style.yellow("⚠️  Built with the host toolchain. A real Lambda deploy needs a Linux binary:"))
+        print("   install a static Linux Swift SDK (swift.org) or set PLUMEKIT_LINUX_SDK, then rebuild.")
+    }
+    if showNextSteps {
+        print("")
+        print("Next: test locally with LocalStack (see \(bundleDir)/README.md).")
+    }
+    return 0
+}
+
+/// Build the standalone native server as a release binary. This is the artifact you
+/// run yourself (systemd, a container, a VM) — `deploy --target native` wraps it in a
+/// Docker image; this just produces the optimized binary and prints its path.
+func buildNativeCommand(path: String) -> Int32 {
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+
+    let buildArgs = ["build", "--package-path", path, "-c", "release", "--product", "Server"]
+    print(Style.cyan("→") + " Building the standalone server (release)")
+    let status = runInherit("swift", buildArgs)
+    guard status == 0 else {
+        errorLine("native server build failed. Does this project have a `Server` executable target?")
+        return status
+    }
+
+    let (binStatus, binOut) = captureStdout("swift", buildArgs + ["--show-bin-path"])
+    let binDir = binOut.trimmingCharacters(in: .whitespacesAndNewlines)
+    let binary = binDir + "/Server"
+    guard binStatus == 0, FileManager.default.fileExists(atPath: binary) else {
+        errorLine("couldn't locate the built Server binary")
+        return 1
+    }
+
+    print("")
+    print(Style.green("✓") + " " + Style.bold("Standalone server → \(binary)"))
+    print("  \(fileSize(binary)) bytes, optimized")
+    print("")
+    print(Style.bold("Next:"))
+    print("  \(binary) --host 0.0.0.0 --port 8080   " + Style.dim("# run it"))
+    print("  " + Style.dim("or: plumekit deploy --target native   # wrap it in a Docker image"))
+    return 0
+}
+
+// MARK: - deploy
+
+/// Deploy one target: run data steps (migrate/seed), build, and ship it.
+func deployCommand(target: String, path: String, outDir: String, migrate: Bool, seed: Bool) -> Int32 {
+    switch target {
+    case "cloudflare": return deployCloudflare(path: path, outDir: outDir, migrate: migrate, seed: seed)
+    case "aws":        return deployAWS(path: path, outDir: outDir, migrate: migrate, seed: seed)
+    case "native":     return deployNative(path: path, migrate: migrate, seed: seed)
+    default:
+        errorLine("unknown deploy target '\(target)'. Supported: cloudflare, aws, native")
+        return 1
+    }
+}
+
+/// Pre-deploy data steps. Cloudflare targets the remote D1; native/AWS use the app's
+/// runMigrations/runSeed against the configured database.
+private func deployDataSteps(path: String, d1: D1Target?, migrate: Bool, seed: Bool) -> Int32 {
+    let scope = d1 == .remote ? " (remote D1)" : ""
+    if migrate {
+        print("→ Migrating\(scope)")
+        let status = migrateCommand(path: path, d1: d1, dbName: nil, assumeYes: true)
+        if status != 0 { return status }
+    }
+    if seed {
+        print("→ Seeding\(scope)")
+        let status = seedCommand(path: path, d1: d1, dbName: nil, assumeYes: true)
+        if status != 0 { return status }
+    }
+    return 0
+}
+
+private func deployCloudflare(path: String, outDir: String, migrate: Bool, seed: Bool) -> Int32 {
+    // Build first: applying migrations/seeds to a remote D1 goes through the bundle's
+    // wrangler.toml, which only exists after the build.
+    let built = buildCloudflareCommand(path: path, outDir: outDir, showNextSteps: false)
+    if built != 0 { return built }
+    let data = deployDataSteps(path: path, d1: .remote, migrate: migrate, seed: seed)
+    if data != 0 { return data }
+
+    let bundleDir = path + "/" + outDir + "/cloudflare"
+    warnMissingCloudflareSecrets(bundleDir: bundleDir)
+    warnIfNoCloudflareAccount(wranglerToml: bundleDir + "/wrangler.toml")
+    print(Style.cyan("→") + " Deploying (wrangler)")
+    let deployTool = toolExists("wrangler") ? "wrangler" : (toolExists("npx") ? "npx" : nil)
+    guard let deployTool else {
+        errorLine("wrangler not found. Install it (npm i -g wrangler) or run `npx wrangler deploy` in \(bundleDir).")
+        return 1
+    }
+    let deployArgs = (deployTool == "npx" ? ["wrangler"] : []) + ["deploy"]
+    let status = runInherit(deployTool, deployArgs, cwd: bundleDir, env: wranglerEnv)
+    if status != 0 { wranglerFailureHint() }
+    return status
+}
+
+/// Warn before deploying if the signing secrets aren't set on the Cloudflare side.
+/// `wrangler secret list` reports the configured secrets; anything missing is a
+/// deploy that would run without a real key. Best-effort: never blocks the deploy.
+private func warnMissingCloudflareSecrets(bundleDir: String) {
+    let required = ["CSRF_SECRET", "CHANNEL_SIGNING_KEY", "AUTH_SECRET"]
+    guard toolExists("wrangler") else { return }
+    let listed = capture("wrangler", ["secret", "list"], cwd: bundleDir, env: wranglerEnv)
+    guard listed.status == 0 else { return }   // can't tell (not logged in?) — don't nag
+    let missing = required.filter { !listed.output.contains($0) }
+    guard !missing.isEmpty else { return }
+    errorLine("Warning: these signing secrets are not set on Cloudflare: \(missing.joined(separator: ", ")).")
+    errorLine("Set each before serving traffic, e.g.  wrangler secret put \(missing[0])")
+    errorLine("Without them the worker has no signing key and CSRF / channel tokens are insecure.")
+}
+
+private func deployAWS(path: String, outDir: String, migrate: Bool, seed: Bool) -> Int32 {
+    // Data steps run through the app's runMigrations/runSeed against the configured
+    // database (point [targets.native] at postgres + DATABASE_URL to target RDS).
+    let data = deployDataSteps(path: path, d1: nil, migrate: migrate, seed: seed)
+    if data != 0 { return data }
+    let built = buildAWSCommand(path: path, outDir: outDir, showNextSteps: false)
+    if built != 0 { return built }
+
+    guard toolExists("aws") else {
+        errorLine("the aws CLI is not installed — needed to update the Lambda function code.")
+        return 1
+    }
+    let function = ProcessInfo.processInfo.environment["AWS_FUNCTION_NAME"] ?? projectName(path)
+    let zip = path + "/" + outDir + "/aws/function.zip"
+    print("→ Deploying (aws lambda update-function-code → \(function))")
+    return runInherit("aws", ["lambda", "update-function-code",
+                              "--function-name", function, "--zip-file", "fileb://\(zip)"])
+}
+
+private func deployNative(path: String, migrate: Bool, seed: Bool) -> Int32 {
+    let data = deployDataSteps(path: path, d1: nil, migrate: migrate, seed: seed)
+    if data != 0 { return data }
+    guard toolExists("docker") else {
+        errorLine("docker is not installed — needed to build the container image.")
+        return 1
+    }
+    let name = projectName(path)
+    print("→ docker build -t \(name)")
+    let status = runInherit("docker", ["build", "-t", name, "."], cwd: path)
+    if status != 0 { return status }
+    print("")
+    print("✓ Built image '\(name)'. Push and run it on your host:")
+    print("  docker push \(name)   ·   fly deploy   ·   your platform's deploy step")
+    return 0
+}
+
+// MARK: - env / doctor / dev / routes
+
+/// Load KEY=VALUE lines from <path>/.env into the environment (existing env wins), so
+/// serve/migrate/dev pick up DATABASE_URL, secrets, etc. without hand-exporting.
+func loadDotEnv(projectPath: String) {
+    guard let contents = try? String(contentsOfFile: projectPath + "/.env", encoding: .utf8) else { return }
+    let ws = CharacterSet.whitespacesAndNewlines   // trims CR too, so CRLF files work
+    for raw in contents.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }) {
+        var line = raw.trimmingCharacters(in: ws)
+        if line.isEmpty || line.hasPrefix("#") { continue }
+        if line.hasPrefix("export ") { line = String(line.dropFirst("export ".count)) }
+        guard let eq = line.firstIndex(of: "=") else { continue }
+        let key = String(line[..<eq]).trimmingCharacters(in: ws)
+        var value = String(line[line.index(after: eq)...]).trimmingCharacters(in: ws)
+        if value.count >= 2,
+           (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+            value = String(value.dropFirst().dropLast())   // quoted values keep '#' and spaces verbatim
+        } else if let hash = value.firstIndex(of: "#") {
+            value = String(value[..<hash]).trimmingCharacters(in: ws)   // strip an inline comment
+        }
+        if ProcessInfo.processInfo.environment[key] == nil { setenv(key, value, 0) }
+    }
+}
+
+/// `plumekit doctor` — report which per-target tools are installed.
+func doctorCommand() -> Int32 {
+    print("PlumeKit environment")
+    let swiftLine = capture("swift", ["--version"]).output
+        .split(separator: "\n").first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "swift"
+    print("  ✓ \(swiftLine)")
+    func check(_ ok: Bool, _ label: String, _ need: String) {
+        print(ok ? "  ✓ \(label)" : "  ✗ \(label) — \(need)")
+    }
+    check(embeddedWasmSDK() != nil, "Embedded WebAssembly SDK", "for `build --target cloudflare` (swift.org wasm SDK)")
+    check(toolExists("wasm-opt"), "wasm-opt (binaryen)", "for Cloudflare builds (brew install binaryen)")
+    check(toolExists("wrangler") || toolExists("npx"), "wrangler", "for Cloudflare deploy (npm i -g wrangler)")
+    check(toolExists("node"), "node", "for the Cloudflare runtime")
+    check(capture("pkg-config", ["--exists", "libpq"]).status == 0, "libpq", "for the Postgres driver (brew install libpq)")
+    check(toolExists("aws"), "aws CLI", "for AWS Lambda deploy")
+    check(toolExists("docker"), "docker", "for the native container image / LocalStack")
+    return 0
+}
+
+/// `plumekit routes` — list the app's registered routes (runs the Server with --routes).
+func routesCommand(path: String) -> Int32 {
+    runInherit("swift", ["run", "--package-path", path, "Server", "--routes"])
+}
+
+/// `plumekit dev` — serve natively, rebuilding + restarting on source/template changes.
+func devCommand(path: String, host: String, port: UInt16) -> Int32 {
+    loadDotEnv(projectPath: path)
+    setenv("PLUMEKIT_ENV", "development", 0)   // dev error page; a user-set value wins
+    print("→ plumekit dev — watching Sources/ and Views/ (ctrl-c to stop)")
+    var server: Process?
+    func restart() {
+        server?.terminate()
+        _ = compileTemplates(projectPath: path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["swift", "run", "--package-path", path, "Server",
+                             "--host", host, "--port", String(port)]
+        try? process.run()
+        server = process
+    }
+    restart()
+    var snapshot = watchSnapshot(path)
+    while true {
+        Thread.sleep(forTimeInterval: 1.0)
+        let current = watchSnapshot(path)
+        if current != snapshot {
+            snapshot = current
+            print("↻ change detected — rebuilding…")
+            restart()
+        }
+    }
+}
+
+private func watchSnapshot(_ path: String) -> [String: Date] {
+    var result: [String: Date] = [:]
+    let fm = FileManager.default
+    for dir in ["Sources", "Views", "Templates"] {
+        let base = path + "/" + dir
+        guard let enumerator = fm.enumerator(atPath: base) else { continue }
+        for case let file as String in enumerator where file.hasSuffix(".swift") || file.hasSuffix(".plume") {
+            let full = base + "/" + file
+            if let m = (try? fm.attributesOfItem(atPath: full))?[.modificationDate] as? Date {
+                result[full] = m
+            }
+        }
+    }
+    return result
+}
+
+// MARK: - console / test
+
+func consoleCommand(path: String) -> Int32 {
+    loadDotEnv(projectPath: path)
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    print("→ plumekit console — building & starting the REPL")
+    return runInherit("swift", ["run", "--package-path", path, "Server", "--console"])
+}
+
+// MARK: - generate (scaffolding)
+
+func generateCommand(arguments: [String]) -> Int32 {
+    let usage = "usage: plumekit generate <resource|model|controller|migration|view|middleware|job|seeder|test|auth|notifications|ci> …"
+    guard let kind = arguments.first else { errorLine(usage); return 1 }
+
+    // These write into an existing project and take no <Name>.
+    if kind == "ci" { return generateCI(arguments: Array(arguments.dropFirst())) }
+    if kind == "auth" || kind == "notifications" {
+        guard FileManager.default.fileExists(atPath: "Sources/App") else {
+            errorLine("run `plumekit generate` from a project root (no Sources/App found)")
+            return 1
+        }
+        return kind == "auth" ? generateAuth() : generateNotifications()
+    }
+
+    guard arguments.count >= 2 else { errorLine(usage); return 1 }
+    let name = arguments[1]
+    let fields = Array(arguments.dropFirst(2))
+
+    guard FileManager.default.fileExists(atPath: "Sources/App") else {
+        errorLine("run `plumekit generate` from a project root (no Sources/App found)")
+        return 1
+    }
+
+    switch kind {
+    case "resource":   return generateResource(name: name, fields: fields)
+    case "model":      return generateModel(name: name, fields: fields)
+    case "controller": return generateController(name: name)
+    case "migration":  return generateMigration(name: name)
+    case "view":       return generateView(name: name)
+    case "middleware": return generateMiddleware(name: name)
+    case "job":        return generateJob(name: name)
+    case "seeder":     return generateSeeder(name: name)
+    case "test":       return generateTest(name: name)
+    default:
+        errorLine("unknown generator '\(kind)'")
+        errorLine(usage)
+        return 1
+    }
+}
+
+/// `plumekit generate ci --provider <github|gitlab|forgejo>` — CI workflows that test
+/// on PRs and run `./plumekit deploy` on push to main (tailored to the [build] target).
+private func generateCI(arguments: [String]) -> Int32 {
+    var provider = "github"
+    var index = 0
+    while index < arguments.count {
+        if arguments[index] == "--provider", index + 1 < arguments.count {
+            provider = arguments[index + 1]; index += 1
+        }
+        index += 1
+    }
+
+    let config = BuildConfig.read(projectPath: ".")
+    let target = config.defaultTarget ?? config.targets.first ?? "cloudflare"
+
+    guard let files = CITemplates.files(provider: provider, target: target) else {
+        errorLine("unknown CI provider '\(provider)' (have: github, gitlab, forgejo)")
+        return 1
+    }
+    for (filePath, contents) in files {
+        let dir = (filePath as NSString).deletingLastPathComponent
+        if !dir.isEmpty {
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        }
+        if !writeFile(contents, to: filePath) { return 1 }
+        print("  + \(filePath)")
+    }
+    print("✓ \(provider) CI: test on PR → main, deploy (\(target)) on push → main.")
+    print("  Set the secrets referenced in the deploy workflow in your repo settings.")
+    return 0
+}
+
+// The individual generators live in Generators.swift; the auth scaffold in
+// AuthGenerator.swift.
+
+// Which database `migrate`/`seed` target. `nil` is the app's own configured
+// database (plumekit.toml); the D1 cases go through wrangler.
+enum D1Target { case local, remote }
+
+func migrateCommand(path: String, d1: D1Target?, dbName: String?, assumeYes: Bool) -> Int32 {
+    loadDotEnv(projectPath: path)
+    if let d1 {
+        return migrateD1(path: path, d1: d1, dbName: dbName, assumeYes: assumeYes)
+    }
+    // Native: the app's Server binary applies migrations under --migrate (it holds
+    // the migration list). Codegen is produced by the build plugin first.
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    print("→ plumekit migrate — applying pending schema changes")
+    return runInherit("swift", ["run", "--package-path", path, "Server", "--migrate"])
+}
+
+func seedCommand(path: String, only: String? = nil, d1: D1Target?, dbName: String?, assumeYes: Bool) -> Int32 {
+    loadDotEnv(projectPath: path)
+    if let d1 {
+        return applyToD1(path: path, verb: "seed", dumpMode: "seed", only: only, d1: d1, dbName: dbName, assumeYes: assumeYes)
+    }
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    print("→ plumekit seed — inserting seed data\(only.map { " (\($0))" } ?? "")")
+    var args = ["run", "--package-path", path, "Server", "--seed"]
+    if let only { args.append(only) }
+    return runInherit("swift", args)
+}
+
+// wrangler must never block on an interactive prompt it can't reach: a wrangler that
+// stops to ask (multiple Cloudflare accounts and none pinned, first-run telemetry
+// consent, not logged in) gets SIGTTIN-suspended and hangs the whole deploy silently.
+// `CI=1` makes wrangler refuse to prompt and exit non-zero with a message instead;
+// disabling metrics skips the first-run consent prompt. Applied ONLY to wrangler spawns
+// (never the swift build/run spawns).
+private let wranglerEnv = ["CI": "1", "WRANGLER_SEND_METRICS": "false"]
+
+/// Heads-up before a `--remote` wrangler op when no Cloudflare account is pinned: a
+/// login with more than one account can't be resolved non-interactively, so wrangler
+/// will fail. Best-effort — never blocks.
+private func warnIfNoCloudflareAccount(wranglerToml: String) {
+    let envSet = ProcessInfo.processInfo.environment["CLOUDFLARE_ACCOUNT_ID"]?.isEmpty == false
+    if envSet || wranglerTomlHasAccountID(wranglerToml) { return }
+    FileHandle.standardError.write(Data(
+        ("note: no Cloudflare account pinned — if your login has more than one account, wrangler "
+       + "can't pick one non-interactively and will fail. Pin one via `account_id = \"…\"` in "
+       + "wrangler.toml or the CLOUDFLARE_ACCOUNT_ID env var.\n").utf8))
+}
+
+/// Does the generated wrangler.toml declare an `account_id`?
+private func wranglerTomlHasAccountID(_ tomlPath: String) -> Bool {
+    guard let toml = try? String(contentsOfFile: tomlPath, encoding: .utf8) else { return false }
+    for rawLine in toml.split(separator: "\n") {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        if line.hasPrefix("account_id"), line.contains("=") { return true }
+    }
+    return false
+}
+
+/// One-line hint appended when a remote wrangler command exits non-zero — the usual
+/// causes are an unauthenticated session or an unpinned account.
+private func wranglerFailureHint() {
+    FileHandle.standardError.write(Data(
+        ("hint: wrangler failed. Check you're logged in (`wrangler login`, or set CLOUDFLARE_API_TOKEN) "
+       + "and, with multiple Cloudflare accounts, pin one (`account_id` in wrangler.toml or "
+       + "CLOUDFLARE_ACCOUNT_ID).\n").utf8))
+}
+
+// Ledger-aware `migrate --local|--remote`: apply ONLY the pending migrations to a
+// Cloudflare D1, honouring its `schema_migrations` ledger. Read the versions already
+// applied on the target, ask the native Server for those migrations' real up() SQL
+// (the wasm worker can't run migrations), and let wrangler load it. This replaces the
+// old full-schema `CREATE TABLE IF NOT EXISTS` dump, which was additive-only — an
+// ALTER on an existing table never landed.
+private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: Bool) -> Int32 {
+    let bundleDir = path + "/" + BuildConfig.read(projectPath: path).out + "/cloudflare"
+    let wranglerToml = bundleDir + "/wrangler.toml"
+    guard FileManager.default.fileExists(atPath: wranglerToml) else {
+        errorLine("no \(wranglerToml) — run `plumekit build --target cloudflare \(path)` first")
+        return 1
+    }
+    let wranglerTool = toolExists("wrangler") ? "wrangler" : "npx"
+    guard toolExists("wrangler") || toolExists("npx") else {
+        errorLine("wrangler not found — install it (`npm i -D wrangler`)")
+        return 1
+    }
+    guard let database = dbName ?? wranglerDatabaseName(wranglerToml) else {
+        errorLine("no d1 database_name in \(wranglerToml); pass --db NAME")
+        return 1
+    }
+    let wranglerArgs = wranglerTool == "npx" ? ["wrangler"] : []
+
+    let remote = d1 == .remote
+    let scope = remote ? "--remote" : "--local"
+    if remote {
+        FileHandle.standardError.write(Data(
+            "⚠️  plumekit migrate --remote targets the LIVE D1 \"\(database)\".\n".utf8))
+        warnIfNoCloudflareAccount(wranglerToml: wranglerToml)
+    }
+
+    // 1. Read the target's ledger. A fresh D1 has no schema_migrations table yet, so a
+    //    non-zero exit (or unparseable output) means "nothing applied" — not an error.
+    var ledgerArgs = wranglerArgs + ["d1", "execute", database, scope, "--json",
+                                     "--command", "SELECT version FROM schema_migrations ORDER BY version"]
+    if assumeYes { ledgerArgs.append("--yes") }
+    let ledger = captureStdout(wranglerTool, ledgerArgs, cwd: bundleDir, env: wranglerEnv)
+    let appliedVersions = ledger.status == 0 ? parseLedgerVersions(ledger.output) : []
+
+    // 2. Ask the native Server for the pending migrations' SQL (build logs → stderr).
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    let appliedFile = bundleDir + "/.plumekit-applied.txt"
+    guard writeFile(appliedVersions.joined(separator: "\n"), to: appliedFile) else {
+        errorLine("could not write \(appliedFile)")
+        return 1
+    }
+    defer { try? FileManager.default.removeItem(atPath: appliedFile) }
+
+    print("→ plumekit migrate \(scope) — computing pending migrations for \"\(database)\" (\(appliedVersions.count) already applied)")
+    let dump = captureStdout("swift", ["run", "--package-path", path, "Server",
+                                       "--dump-sql", "pending", appliedFile])
+    guard dump.status == 0 else {
+        errorLine("computing pending migrations failed (Server --dump-sql pending exited \(dump.status))")
+        return dump.status
+    }
+
+    // 3. The Server prefixes a `-- plumekit-pending: v1,v2` comment (harmless SQL) so we
+    //    know which versions will apply — and can skip wrangler when none are pending.
+    let pending = parsePendingHeader(dump.output)
+    if pending.isEmpty {
+        FileHandle.standardError.write(Data("→ already up to date (\(appliedVersions.count) applied)\n".utf8))
+        return 0
+    }
+
+    let sqlFile = bundleDir + "/.plumekit-migrate.sql"
+    guard writeFile(dump.output, to: sqlFile) else {
+        errorLine("could not write \(sqlFile)")
+        return 1
+    }
+    defer { try? FileManager.default.removeItem(atPath: sqlFile) }
+
+    print("→ applying \(pending.count) migration(s): \(pending.joined(separator: ", "))")
+    var args = wranglerArgs + ["d1", "execute", database, scope, "--file", ".plumekit-migrate.sql"]
+    if assumeYes { args.append("--yes") }
+    let status = runInherit(wranglerTool, args, cwd: bundleDir, env: wranglerEnv)
+    if remote && status != 0 { wranglerFailureHint() }
+    return status
+}
+
+/// Versions from `wrangler d1 execute --json` for the ledger SELECT. wrangler emits
+/// `[{"results":[{"version":"…"}, …], …}]` (one object per statement); a missing table
+/// or any parse miss → [] (treated as a fresh database by the caller).
+private func parseLedgerVersions(_ json: String) -> [String] {
+    guard let data = json.data(using: .utf8),
+          let top = try? JSONSerialization.jsonObject(with: data) else { return [] }
+    let objects: [Any] = (top as? [Any]) ?? [top]
+    var versions: [String] = []
+    for obj in objects {
+        guard let dict = obj as? [String: Any], let results = dict["results"] as? [Any] else { continue }
+        for row in results {
+            if let rowDict = row as? [String: Any], let v = rowDict["version"] as? String { versions.append(v) }
+        }
+    }
+    return versions
+}
+
+/// The `-- plumekit-pending: v1,v2` header the Server prints ahead of the pending SQL.
+/// An empty list (or no header) means the target is already up to date.
+private func parsePendingHeader(_ sql: String) -> [String] {
+    let marker = "-- plumekit-pending:"
+    for rawLine in sql.split(separator: "\n") {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        guard line.hasPrefix(marker) else { continue }
+        let list = line.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+        if list.isEmpty { return [] }
+        return list.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+    return []
+}
+
+// Apply a slice of the app's schema/seed to a Cloudflare D1: the native Server
+// dumps it as SQL (it can't run in the wasm worker), and wrangler loads it. One
+// command in place of `Server --dump-sql … > f.sql && wrangler d1 execute … -f f.sql`.
+private func applyToD1(path: String, verb: String, dumpMode: String, only: String? = nil,
+                       d1: D1Target, dbName: String?, assumeYes: Bool) -> Int32 {
+    let bundleDir = path + "/" + BuildConfig.read(projectPath: path).out + "/cloudflare"
+    let wranglerToml = bundleDir + "/wrangler.toml"
+    guard FileManager.default.fileExists(atPath: wranglerToml) else {
+        errorLine("no \(wranglerToml) — run `plumekit build --target cloudflare \(path)` first")
+        return 1
+    }
+    let wranglerTool = toolExists("wrangler") ? "wrangler" : "npx"
+    guard toolExists("wrangler") || toolExists("npx") else {
+        errorLine("wrangler not found — install it (`npm i -D wrangler`)")
+        return 1
+    }
+    guard let database = dbName ?? wranglerDatabaseName(wranglerToml) else {
+        errorLine("no d1 database_name in \(wranglerToml); pass --db NAME")
+        return 1
+    }
+
+    let remote = d1 == .remote
+    let scope = remote ? "--remote" : "--local"
+    if remote {
+        FileHandle.standardError.write(Data(
+            "⚠️  plumekit \(verb) --remote targets the LIVE D1 \"\(database)\".\n".utf8))
+        warnIfNoCloudflareAccount(wranglerToml: wranglerToml)
+    }
+
+    // Dump the SQL from the app (build logs → stderr, SQL → captured stdout).
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    print("→ plumekit \(verb) \(scope) — dumping \(dumpMode) SQL for \"\(database)\"")
+    var dumpArgs = ["run", "--package-path", path, "Server", "--dump-sql", dumpMode]
+    if let only { dumpArgs.append(only) }   // seed a single named seeder, not all
+    let dump = captureStdout("swift", dumpArgs)
+    guard dump.status == 0 else {
+        errorLine("dumping \(dumpMode) SQL failed (Server --dump-sql exited \(dump.status))")
+        return dump.status
+    }
+
+    let sqlFile = bundleDir + "/.plumekit-\(verb).sql"
+    guard writeFile(dump.output, to: sqlFile) else {
+        errorLine("could not write \(sqlFile)")
+        return 1
+    }
+    defer { try? FileManager.default.removeItem(atPath: sqlFile) }
+
+    var args = (wranglerTool == "npx" ? ["wrangler"] : [])
+        + ["d1", "execute", database, scope, "--file", ".plumekit-\(verb).sql"]
+    if assumeYes { args.append("--yes") }
+    let status = runInherit(wranglerTool, args, cwd: bundleDir, env: wranglerEnv)
+    if remote && status != 0 { wranglerFailureHint() }
+    return status
+}
+
+/// Parse `database_name = "…"` out of a generated wrangler.toml.
+private func wranglerDatabaseName(_ tomlPath: String) -> String? {
+    guard let toml = try? String(contentsOfFile: tomlPath, encoding: .utf8) else { return nil }
+    for rawLine in toml.split(separator: "\n") {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        guard line.hasPrefix("database_name"), let eq = line.firstIndex(of: "=") else { continue }
+        return line[line.index(after: eq)...]
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+    }
+    return nil
+}
+
+func testCommand(path: String) -> Int32 {
+    return runInherit("swift", ["test", "--package-path", path])
+}

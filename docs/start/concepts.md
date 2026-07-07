@@ -1,100 +1,128 @@
 # Concepts
 
-Plume works best when you treat a template as the source for one piece of a page: the HTML it renders, the components it calls, and the resources that belong to that markup.
+PlumeKit has one governing idea: **write the app once, run it on any target.**
+Everything else (the module layout, the capability bindings, the request
+lifecycle) exists to make that literally true, with no platform branches in your
+code. This page is the mental model; the feature docs are the detail.
 
-The language stays small on purpose. Host applications provide the project shape, pass data, resolve assets, and decide how collected resources are emitted.
+## One portable core, many adapters
 
-## Terms
+PlumeKit is split into a platform-agnostic core and thin per-platform adapters.
 
-- A template renders HTML from host-provided data.
-- A component is a reusable template fragment with arguments and slots.
-- A context is the data dictionary the host passes into rendering.
-- A resource is a `@style`, `@script`, `@image`, or `asset()` reference collected while rendering.
-- The runtime is optional browser JavaScript emitted by the host when a render result needs state, actions, or page navigation.
+- **`PlumeCore`** is the framework core: routing, request/response, middleware, the
+  capability seam, auth, and the API surface. It uses no Foundation and no
+  runtime reflection (bytes are `[UInt8]`), so it compiles to a tiny WebAssembly
+  module as readily as it does a native binary.
+- **`PlumeORM`** is the `@Model` macro, the row codec, the typed
+  query builder, and the migrator. It also compiles to Wasm, and it talks only to
+  the SQL capability, so a model runs unchanged on native SQLite, Postgres, and
+  Cloudflare D1.
+- **`PlumeServer`** is the native adapter: a SwiftNIO HTTP/1.1 server, the native
+  binding drivers (SQLite, filesystem object storage, in-process queue, and so on), the
+  `plumekit serve` runtime, and the interactive console.
+- **`PlumeWorker`** is the Cloudflare adapter: the Wasm byte marshalling and the
+  async host-binding bridge that lets the module call Cloudflare's KV, D1, R2, and
+  queues.
+- **`Plume`** / **`PlumeRuntime`** are the templating language: the compiler and the
+  render runtime. They are one component of the framework, not its
+  center, and are usable on their own.
 
-## Flow
+Your app is a library of routes plus two thin entry points. Both entry points call
+the same `buildApp()`:
 
-Start with plain HTML and expressions:
-
-```plume
-<article>
-  <h2>{post.title | default("Untitled")}</h2>
-  {post.excerpt}
-</article>
+```
+                 Sources/App/  ── buildApp() ──▶  Application (routes + middleware)
+                      │                                  │
+        ┌─────────────┴─────────────┐        ┌───────────┴────────────┐
+   Sources/Server/main.swift   Sources/Worker/main.swift
+   PlumeServer (native NIO)     PlumeWorker (Wasm + JSPI)
+   `plumekit serve`             `plumekit build --target cloudflare`
 ```
 
-When the same shape appears more than once, extract a component:
+The core knows nothing about NIO or Cloudflare. An adapter decodes a transport
+request into a `Request`, calls `Application.handle(_:)`, and serializes the
+returned `Response` back onto the wire.
 
-```plume
-@component PostCard(post, showExcerpt = true) {
-  <article class="post-card">
-    <h2>{post.title | default("Untitled")}</h2>
-    @if showExcerpt {
-      {post.excerpt}
-    }
-  </article>
-}
+## The capability seam
+
+Your handlers never name a platform type: no `env`, no `D1Database`, no
+`KVNamespace`. Instead they reach host services through **capability bindings**:
+small concrete structs of async closures carried on each request's `Context` (KV,
+database, storage, queue, HTTP client, secrets, mailer, broadcaster, and a log
+function). Each capability is a protocol (the *adapter contract*) plus a concrete
+handle that wraps any conforming adapter via an opaque `some` generic.
+
+Which adapter backs each capability is decided at the **composition root**, driven
+by a per-project `plumekit.toml`:
+
+```toml
+[capabilities]           # which capabilities this app uses
+kv       = true
+database = true
+
+[targets.native]                 # native driver selection
+database = "sqlite"      # sqlite | postgres
+
+[targets.cloudflare]             # Cloudflare adapter selection
+database = "d1"
 ```
 
-When markup needs supporting CSS or behaviour, co-locate the resource with the markup that owns it:
+A build-tool plugin regenerates two files from this manifest on every build:
 
-```plume
-@component PostCard(post) {
-  @style(scoped) {
-    .post-card {
-      display: grid;
-      gap: 0.75rem;
-    }
-  }
+- **`Bindings.swift`**: a typed `request.bindings` view exposing exactly the
+  capabilities you declared. Reaching for one you did not declare is a *compile*
+  error, because no accessor is generated for it.
+- **`Composition.swift`**: the native composition root that wires the selected
+  drivers into a `Context` for `plumekit serve`.
 
-  <article class="post-card">
-    <h2>{post.title}</h2>
-    @slot
-  </article>
-}
+Changing a driver is a one-line edit to `plumekit.toml` and a rebuild. No app-code
+change, no platform conditional. On Cloudflare the bindings are configured in
+`wrangler.toml` and bridged in by the generated Worker glue.
+
+## The request lifecycle
+
+A request flows through the middleware stack, into a matched route, and back out as
+a response:
+
+```
+Request ─▶ middleware₀ ─▶ middleware₁ ─▶ … ─▶ route handler ─▶ Response
+             (each may short-circuit or transform on the way out)
 ```
 
-## Files
+- **Routing** matches an HTTP method and a path pattern (with `:name` path
+  parameters). No match is a 404; a path that exists for another method is a 405.
+- **Middleware** is a function `(Request, next) async throws -> Response`.
+  Registration order is nesting order: the first-registered middleware is outermost.
+  A middleware may inspect or rewrite the request, call `next` to continue, or return
+  early to short-circuit.
+- **Handlers** are `async throws` closures. `async` is what lets a handler `await` a
+  host binding (a KV read, a SQL query); a thrown error becomes a 500.
 
-Plume itself does not require a folder structure. The host decides how templates and components are discovered.
+The same `Request` and `Response` value types are used everywhere. Bodies are
+`[UInt8]`; convenience constructors (`.text`, `.html`, `.json`, `.redirect`) cover
+the common cases. See [Routing](../routing.md) and [Middleware](../middleware.md).
 
-For larger sites, this shape keeps things predictable:
+## Async, natively and as Wasm
 
-```txt
-theme/
-  layouts/
-    default.plume
-  pages/
-    home.plume
-    post.plume
-    page.plume
-  components/
-    PostCard.plume
-  styles/
-    site.css
-  scripts/
-    site.plume
-```
+Handlers are `async` because host bindings are asynchronous on every target. On the
+native server, an `await` on a binding calls an in-process driver. On Cloudflare,
+the same `await` suspends the WebAssembly stack across the boundary to the JS host
+(via JSPI) while Cloudflare fetches from KV/D1/R2, then resumes the module. Your
+code is identical; only the adapter behind the closure differs.
 
-Inkstead Writer uses this structure by default when ejecting a theme. Smaller sites can still keep page templates directly under `theme/` when the host supports it.
+## Plume is one component
 
-## Naming
+Plume, the templating language, is PlumeKit's built-in view layer, but it is not
+the framework's core. A `.plume` file compiles to a render function
+that writes HTML into a buffer; a handler calls it and returns the bytes as a
+response. The core stays view-engine-agnostic: it only ever sees `[UInt8]`. Because
+the language is a standalone module, an external static-site generator can use
+Plume without any of the web framework. See [Plume views in
+PlumeKit](../plume-views.md).
 
-- Use PascalCase for component names, such as `PostCard` or `SiteHeader`.
-- Use lower-case filenames for page templates, such as `home.plume` and `feed.xml.plume`.
-- Prefer named arguments for options that are not the main value, such as `@PostCard(post, tone: "featured")`.
-- Keep global layout resources in a layout template.
-- Keep component resources inside the component when they belong only to that component.
+## Where to go next
 
-## Host Boundary
-
-Plume does not assume a web framework. A host can be a static site generator, a server-side Swift app, a build tool, or a custom renderer.
-
-That boundary is why the same Plume syntax can work inside Inkstead Writer and inside another Swift application with different asset and deployment rules. For the Swift API and host responsibilities, see [Embedding](../embedding/index.md).
-
-## Common Mistakes
-
-- Do not write Liquid syntax like `{{ title }}` or `{% if post %}`.
-- Do not use `| raw` for user-provided or unsanitised strings.
-- Do not expect `render()` alone to emit styles, scripts, images, or runtime files. Use `renderResult()` when your host needs resources.
-- Do not put every interaction into `@script`. Use `@state` and event actions first when the behaviour is local and declarative.
+- [Getting started](getting-started.md): build and run an app end to end.
+- [Bindings & drivers](../bindings.md): the full capability catalogue and driver
+  selection.
+- [Portability](../portability.md): how one app targets both runtimes.

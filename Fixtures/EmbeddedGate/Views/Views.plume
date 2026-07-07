@@ -1,0 +1,1 @@
+@component PostList(posts: [Post], heading: String = "Posts") {<section><h1>{heading}</h1>@if posts.size > 0 {<ul>@for post in posts {<li><a href="{post.slug}">{forloop.index}. {post.title}</a></li>}</ul>} else {<p>Nothing here yet.</p>}</section>}

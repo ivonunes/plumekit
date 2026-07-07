@@ -19,20 +19,41 @@ extension PlumeParser {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .map { parameter throws -> PlumeParameter in
+                // A parameter is `name`, `name = default`, `name: Type`, or
+                // `name: Type = default`. Split the default off first (top-level
+                // `=`), then split an optional Swift type annotation off the head
+                // (top-level `:`, which correctly ignores colons inside a
+                // dictionary type such as `[String: Int]`).
+                var head = parameter
+                var defaultExpression: String?
                 if let equals = topLevelIndex(of: "=", in: parameter) {
-                    let name = String(parameter[..<equals]).trimmingCharacters(
+                    head = String(parameter[..<equals]).trimmingCharacters(
                         in: .whitespacesAndNewlines)
                     let expression = String(parameter[parameter.index(after: equals)...])
                         .trimmingCharacters(in: .whitespacesAndNewlines)
-                    try validateComponentParameter(name, context: context)
                     guard !expression.isEmpty else {
                         throw error(
-                            "Missing default value for component parameter \(name).", at: context)
+                            "Missing default value for component parameter \(head).", at: context)
                     }
-                    return PlumeParameter(name: name, defaultExpression: expression)
+                    defaultExpression = expression
                 }
-                try validateComponentParameter(parameter, context: context)
-                return PlumeParameter(name: parameter, defaultExpression: nil)
+
+                var name = head
+                var typeAnnotation: String?
+                if let colon = topLevelIndex(of: ":", in: head) {
+                    name = String(head[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let type = String(head[head.index(after: colon)...]).trimmingCharacters(
+                        in: .whitespacesAndNewlines)
+                    guard !type.isEmpty else {
+                        throw error(
+                            "Missing Swift type for component parameter \(name).", at: context)
+                    }
+                    typeAnnotation = type
+                }
+
+                try validateComponentParameter(name, context: context)
+                return PlumeParameter(
+                    name: name, defaultExpression: defaultExpression, typeAnnotation: typeAnnotation)
             }
         let duplicates = Dictionary(grouping: parameters, by: \.name).filter { $0.value.count > 1 }
             .keys

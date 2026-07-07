@@ -1,64 +1,70 @@
-# Plume
+# PlumeKit
 
-Plume is a templating language for building expressive websites. It brings HTML, styles, assets, and behaviour into one coherent authoring model, with components, scoped styles, responsive media, build-time checks, and lightweight interactivity designed to feel clear, calm, and close to the web.
+A delightful Swift web framework that runs anywhere. Write your routes, models, and views
+once: the same code runs natively on your own server, compiles to WebAssembly
+for Cloudflare Workers, and deploys to AWS Lambda. No rewrites, no platform
+branches.
 
-This package contains:
+```swift
+@Model final class Post: Model {
+    var id: Int
+    var title: String
+    var published = false
+}
 
-- The `Plume` Swift module.
-- The Plume parser, renderer, formatter, checker, and client-script compiler.
-- `PlumeLanguageServer`, used by editor integrations.
-- A standalone `plume` CLI for formatting, checking, and language-server support.
-- VS Code and Nova extensions under `editors/`.
-- A documentation tree under `docs/`.
+app.get("/posts") { _ in
+    let posts = try await Post.where(Post.published == true)
+        .order(by: Post.id, .descending)
+        .all()
+    return .view(postsPage(posts: posts))
+}
+```
+
+Batteries included: routing, a type-safe ORM with migrations, the **Plume**
+templating language, auth, validations, background jobs, scheduled tasks,
+real-time channels, transactions, flash messages, and one-command deploys.
+All of it works out of the box and behaves identically on every target.
 
 ## Install
 
-Install the standalone CLI with Homebrew:
+```sh
+brew install ivonunes/tap/plumekit
+# or
+curl -fsSL https://install.plumekit.dev | sh
+```
+
+## Quickstart
 
 ```sh
-brew tap ivonunes/tap
-brew install plume
+plumekit new myapp
+cd myapp
+./plumekit dev            # serve on http://127.0.0.1:8080, restart on change
+
+./plumekit generate resource Post title:string    # a working CRUD resource
+./plumekit migrate
+./plumekit test
+
+./plumekit deploy         # the same app, live on your default target
 ```
-
-Or use the installer:
-
-```sh
-curl -fsSL https://install.inkstead.dev/plume | sh
-```
-
-You can also embed Plume in a Swift package:
-
-```swift
-.package(url: "https://github.com/ivonunes/plume", from: "1.0.0")
-```
-
-```swift
-.product(name: "Plume", package: "plume")
-```
-
-## Development
-
-```sh
-swift test
-```
-
-Editor integrations can launch the language server directly:
-
-```sh
-plume language-server
-```
-
-Inkstead Writer embeds Plume and exposes `inkstead-writer theme language-server` as a bridge for site-local wrappers.
-
-The VS Code and Nova extensions are packaged as release artifacts. They prefer a site-local `./inkstead-writer` wrapper inside Writer projects, then fall back to the standalone `plume` command on `PATH`.
 
 ## Documentation
 
-The docs are published under `inkstead.dev/plume` and live in `docs/`. They are organised around Start, Syntax, Components, Customise, Embedding, and Tooling.
+Everything lives at **[plumekit.dev](https://plumekit.dev)**:
 
-- [Start](docs/start/getting-started.md): install the CLI, write a first template, check it, and format it.
-- [Syntax](docs/syntax/index.md): output, expressions, conditionals, loops, filters, methods, and attributes.
-- [Components](docs/components/index.md): component APIs, defaults, slots, named slots, composition, and loading.
-- Customise: [Resources](docs/customise/resources.md) covers styles, scripts, assets, and images; [Behaviour](docs/customise/behaviour.md) covers state, actions, browser helpers, scripts, and navigation.
-- [Embedding](docs/embedding/index.md): Swift APIs, render results, resources, runtime, and host responsibilities.
-- [Tooling](docs/tooling/index.md): CLI commands, editor support, checks, CI formatting, and troubleshooting.
+- [Getting started](https://plumekit.dev/docs/start/getting-started/): install to first deploy.
+- [Tutorial](https://plumekit.dev/docs/start/tutorial/): build a small app in 15 minutes.
+- [Documentation](https://plumekit.dev/docs/): every feature, in depth.
+
+(The same docs live in [docs/](docs/) in this repo.)
+
+## Developing the framework
+
+```sh
+swift build
+swift test                    # framework + templating suites
+./support/embedded-check.sh   # the core must stay Embedded-Wasm-clean
+./support/embedded-gate.sh    # native and Wasm renders must be byte-identical
+```
+
+`Fixtures/` holds the verification apps these gates build. Editor extensions for
+the Plume language (VS Code, Nova) live under `editors/`.

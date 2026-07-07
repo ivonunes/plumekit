@@ -21,6 +21,16 @@ final class PlumeRegressionTests: XCTestCase {
         }
     }
 
+    func testUnquotedInterpolatedAttributeIsRejected() throws {
+        // A value with a space would inject an attribute out of an unquoted value.
+        XCTAssertThrowsError(try PlumeTemplate("<a href={url}>x</a>")) { error in
+            XCTAssertTrue((error as? PlumeError)?.message.contains("Quote") ?? false)
+        }
+        // Quoted attributes and body text with `=` are fine.
+        XCTAssertNoThrow(try PlumeTemplate(#"<a href="{url}">x</a>"#))
+        XCTAssertNoThrow(try PlumeTemplate("<p>2 = {n} today</p>"))
+    }
+
     func testEscapingIncludesSingleQuotes() throws {
         let template = try PlumeTemplate(#"<p title="{name}">{name}</p>"#)
         let html = try template.render(["name": "O'Brien & \"Co\" <em>"])
@@ -188,4 +198,13 @@ final class PlumeRegressionTests: XCTestCase {
         XCTAssertEqual(broken.count, 1)
         XCTAssertTrue(broken.first?.message.contains("Missing closing }") == true)
     }
+
+    func testCompilerPreservesXMLNamespacedAttributes() {
+        // The compiling back-end must not rewrite xmlns/xml/xlink/epub as `attr:value=`
+        // helpers (mirrors the interpreter, which this file already covers).
+        XCTAssertTrue(PlumeCompiledDesugar.desugar(##"<use xlink:href="#icon"></use>"##).contains(##"xlink:href="#icon""##))
+        XCTAssertTrue(PlumeCompiledDesugar.desugar(#"<section epub:type="chapter"></section>"#).contains(#"epub:type="chapter""#))
+        XCTAssertTrue(PlumeCompiledDesugar.desugar(#"<a class:active="{on}">x</a>"#).contains("@if"))   // real helper still desugars
+    }
+
 }

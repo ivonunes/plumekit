@@ -131,13 +131,17 @@ public struct PlumeNavigationResource: Equatable {
     public var viewTransitions: Bool
     public var scroll: String
     public var minimumDuration: Int
+    public var progressBar: Bool
+    public var progressBarDelay: Int
     public var hooks: [PlumeNavigationHook]
 
-    public init(root: String = "body", viewTransitions: Bool = true, scroll: String = "top", minimumDuration: Int = 0, hooks: [PlumeNavigationHook] = []) {
+    public init(root: String = "body", viewTransitions: Bool = true, scroll: String = "top", minimumDuration: Int = 0, progressBar: Bool = true, progressBarDelay: Int = 500, hooks: [PlumeNavigationHook] = []) {
         self.root = root
         self.viewTransitions = viewTransitions
         self.scroll = scroll
         self.minimumDuration = minimumDuration
+        self.progressBar = progressBar
+        self.progressBarDelay = progressBarDelay
         self.hooks = hooks
     }
 }

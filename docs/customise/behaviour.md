@@ -170,6 +170,30 @@ Use `@navigation` when same-origin links should fetch and swap page content inst
 
 Put it in a layout template when the whole site should use it.
 
+Available options:
+
+- `root` — the selector for the element swapped on navigation (default `"body"`).
+- `viewTransitions` — animate swaps with the View Transitions API when the
+  browser supports it (default `true`).
+- `scroll` — `"top"`, `"preserve"`, or `"none"` (default `"top"`).
+- `minimumDuration` — a minimum visit duration in milliseconds, useful to let a
+  leave animation finish (default `0`).
+- `progressBar` — show a slim progress bar at the top of the viewport while a
+  visit or intercepted form submission is in flight (default `true`). Set
+  `progressBar: false` to disable it.
+- `progressBarDelay` — how long a request must run, in milliseconds, before the
+  bar appears (default `500`), so fast navigations never flash it.
+
+The progress bar needs no app CSS — the runtime injects its own namespaced
+style (`.plume-progress-bar`, 3px tall, fixed to the top of the viewport). To
+match your brand, override its color from plain CSS with a custom property:
+
+```css
+:root {
+  --plume-progress-color: #16a34a;
+}
+```
+
 Available hooks:
 
 - `on:start`

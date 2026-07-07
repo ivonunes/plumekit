@@ -8,3 +8,17 @@ editors/vscode/node_modules/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 *.vsix
+
+# PlumeKit framework build output + tooling
+.build/
+**/.build/
+*.bc
+
+Package.resolved
+dist/
+**/dist/
+.plumekit/
+node_modules/
+**/node_modules/
+.wrangler/
+**/.wrangler/

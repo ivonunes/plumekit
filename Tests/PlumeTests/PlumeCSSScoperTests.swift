@@ -9,6 +9,37 @@ final class PlumeCSSScoperTests: XCTestCase {
         XCTAssertEqual(output, ".card[\(attribute)] { display: grid; }")
     }
 
+    func testScopesKeyCompoundNotAnAncestorWithPseudoClass() {
+        // The scope must land on the subject (last compound), not on an ancestor that
+        // happens to carry a pseudo-class before a combinator.
+        XCTAssertEqual(
+            PlumeCSSScoper.scope(".menu:hover .item { color: red; }", attribute: attribute),
+            ".menu:hover .item[\(attribute)] { color: red; }")
+        XCTAssertEqual(
+            PlumeCSSScoper.scope(":root .card { color: red; }", attribute: attribute),
+            ":root .card[\(attribute)] { color: red; }")
+        XCTAssertEqual(
+            PlumeCSSScoper.scope("a:hover + b { color: red; }", attribute: attribute),
+            "a:hover + b[\(attribute)] { color: red; }")
+    }
+
+    func testCommentInSelectorDoesNotMisSplitOrMisScope() {
+        // A `,` or `:` inside a selector comment must not split or misplace the scope,
+        // and the comment is preserved.
+        XCTAssertEqual(
+            PlumeCSSScoper.scope(".a, /* a,b */ .b { color: red; }", attribute: attribute),
+            ".a[\(attribute)], /* a,b */ .b[\(attribute)] { color: red; }")
+        XCTAssertEqual(
+            PlumeCSSScoper.scope(".a /* : */ .b { color: red; }", attribute: attribute),
+            ".a /* : */ .b[\(attribute)] { color: red; }")
+    }
+
+    func testEscapedQuoteInAttributeSelectorDoesNotSplit() {
+        XCTAssertEqual(
+            PlumeCSSScoper.scope(#"a[title="x\",y"] { color: red; }"#, attribute: attribute),
+            #"a[title="x\",y"][\#(attribute)] { color: red; }"#)
+    }
+
     func testScopesLastCompoundOfDescendantSelectors() {
         let output = PlumeCSSScoper.scope(".card img { opacity: 0.8; }", attribute: attribute)
         XCTAssertEqual(output, ".card img[\(attribute)] { opacity: 0.8; }")

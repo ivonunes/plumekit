@@ -168,7 +168,7 @@ Plume also guards against runaway recursion. A component that calls itself, dire
 
 Plume itself does not require a component folder. Hosts decide which component sources to provide to a template environment.
 
-Inkstead Writer loads components from `theme/components`:
+A host commonly loads components from a `components` folder:
 
 ```txt
 theme/

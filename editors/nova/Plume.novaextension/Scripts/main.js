@@ -52,6 +52,32 @@ exports.activate = function() {
     }
   });
 
+  // PlumeKit framework commands — run the CLI (preferring ./plumekit) and report.
+  const frameworkCommands = {
+    "plumekit.dev": ["dev"],
+    "plumekit.serve": ["serve"],
+    "plumekit.build": ["build"],
+    "plumekit.deploy": ["deploy"],
+    "plumekit.migrate": ["migrate"],
+    "plumekit.routes": ["routes"],
+    "plumekit.doctor": ["doctor"]
+  };
+  Object.keys(frameworkCommands).forEach(function(id) {
+    nova.commands.register(id, function() {
+      runPlumekit(id.replace("plumekit.", ""), frameworkCommands[id]);
+    });
+  });
+  nova.commands.register("plumekit.generate", function() {
+    const kinds = ["resource", "auth", "model", "controller", "migration", "view", "middleware", "job", "seeder"];
+    nova.workspace.showChoicePalette(kinds, { placeholder: "Generate…" }, function(kind) {
+      if (!kind) return;
+      if (kind === "auth") { runPlumekit("generate", ["generate", "auth"]); return; }
+      nova.workspace.showInputPalette(`Name (and fields) for the ${kind}`, {}, function(name) {
+        if (name) runPlumekit("generate", ["generate", kind].concat(name.trim().split(/\s+/)));
+      });
+    });
+  });
+
   startLanguageServer();
 };
 
@@ -103,10 +129,16 @@ function commandConfiguration() {
     return writerCommand(workspaceLauncher);
   }
 
+  // Prefer the project's committed ./plumekit wrapper — it pins the CLI version.
+  const workspacePlumekit = nova.workspace.path ? nova.path.join(nova.workspace.path, "plumekit") : null;
+  if (workspacePlumekit && nova.fs.access(workspacePlumekit, nova.fs.X_OK)) {
+    return plumeCommand(workspacePlumekit);
+  }
+
   return {
     path: "/usr/bin/env",
-    languageServerArgs: ["plume", "language-server"],
-    checkArgs: ["plume", "check"]
+    languageServerArgs: ["plumekit", "language-server"],
+    checkArgs: ["plumekit", "check"]
   };
 }
 
@@ -129,4 +161,34 @@ function plumeCommand(path) {
 function pathBaseName(path) {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1];
+}
+
+// How to invoke `plumekit <subArgs>` — the project's ./plumekit wrapper if present,
+// else `plumekit` on PATH via /usr/bin/env.
+function plumekitInvocation(subArgs) {
+  const local = nova.workspace.path ? nova.path.join(nova.workspace.path, "plumekit") : null;
+  if (local && nova.fs.access(local, nova.fs.X_OK)) {
+    return { path: local, args: subArgs };
+  }
+  return { path: "/usr/bin/env", args: ["plumekit"].concat(subArgs) };
+}
+
+function runPlumekit(name, subArgs) {
+  const invocation = plumekitInvocation(subArgs);
+  const workspace = nova.workspace.path || undefined;
+  console.log(`plumekit ${subArgs.join(" ")}`);
+  const process = new Process(invocation.path, { args: invocation.args, cwd: workspace });
+  let output = "";
+  process.onStdout(function(line) { output += line; console.log(line); });
+  process.onStderr(function(line) { output += line; console.error(line); });
+  process.onDidExit(function(status) {
+    const ok = status === 0;
+    notify(`PlumeKit ${name}${ok ? "" : " failed"}`,
+           output.trim() || (ok ? "Done." : `Exited with status ${status}. See the Extension Console.`));
+  });
+  try {
+    process.start();
+  } catch (error) {
+    notify(`PlumeKit ${name} failed`, error && error.message ? error.message : String(error));
+  }
 }

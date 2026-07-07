@@ -44,7 +44,7 @@ print(result.navigation)
 print(result.requiresRuntime)
 ```
 
-The host decides how resources are emitted. Inkstead Writer turns collected styles and scripts into fingerprinted files, emits responsive images, and injects runtime scripts only when needed.
+The host decides how resources are emitted. A host typically turns collected styles and scripts into fingerprinted files, emits responsive images, and injects runtime scripts only when needed.
 
 Use `renderResult` for any template that may contain `@style`, `@script`, `@image`, `@state`, event bindings, or `@navigation`.
 

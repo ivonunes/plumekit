@@ -2,7 +2,7 @@
   "identifier": "uk.ivonunes.plume",
   "name": "Plume",
   "organization": "Ivo Nunes",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Language support for Plume templates.",
   "icon": "Images/extension.png",
   "categories": [
@@ -11,8 +11,8 @@
     "formatters",
     "issues"
   ],
-  "bugs": "https://github.com/ivonunes/plume/issues",
-  "repository": "https://github.com/ivonunes/plume",
+  "bugs": "https://github.com/ivonunes/plumekit/issues",
+  "repository": "https://github.com/ivonunes/plumekit",
   "license": "MIT",
   "min_runtime": "10.0",
   "main": "main.js",
@@ -30,7 +30,7 @@
       "title": "Plume Tool Path",
       "type": "string",
       "default": "",
-      "description": "Path to the plume CLI or inkstead-writer launcher. Leave empty to use the workspace Inkstead Writer launcher, then plume on PATH."
+      "description": "Path to the plumekit CLI. Leave empty to use ./plumekit in the workspace, then plumekit on PATH."
     }
   },
   "commands": {
@@ -42,7 +42,15 @@
       {
         "title": "Check Templates",
         "command": "plume.checkTheme"
-      }
+      },
+      { "title": "PlumeKit: Dev Server (watch)", "command": "plumekit.dev" },
+      { "title": "PlumeKit: Serve", "command": "plumekit.serve" },
+      { "title": "PlumeKit: Build", "command": "plumekit.build" },
+      { "title": "PlumeKit: Deploy", "command": "plumekit.deploy" },
+      { "title": "PlumeKit: Migrate", "command": "plumekit.migrate" },
+      { "title": "PlumeKit: Show Routes", "command": "plumekit.routes" },
+      { "title": "PlumeKit: Doctor", "command": "plumekit.doctor" },
+      { "title": "PlumeKit: Generate…", "command": "plumekit.generate" }
     ]
   }
 }

@@ -21,6 +21,20 @@ final class PlumeBrowserRuntimeTests: XCTestCase {
     func testJavaScriptReadsTheStateScriptTag() {
         let js = PlumeBrowserRuntime.javaScript
         XCTAssertTrue(js.contains(#"script[data-plume-state]"#))
+        // A page with @navigation but no @state must still boot the runtime, so
+        // the missing state hook cannot early-return out of bootPlumeRuntime.
+        XCTAssertFalse(js.contains("if (!stateScript) return;"))
+    }
+
+    func testJavaScriptImplementsTheNavigationProgressBar() {
+        let js = PlumeBrowserRuntime.javaScript
+        // Public surface + injected, namespaced style with an app-overridable color.
+        XCTAssertTrue(js.contains("Plume.progress"))
+        XCTAssertTrue(js.contains("plume-progress-bar"))
+        XCTAssertTrue(js.contains("--plume-progress-color"))
+        // @navigation options wired through the emitted config JSON.
+        XCTAssertTrue(js.contains("progressBar"))
+        XCTAssertTrue(js.contains("progressBarDelay"))
     }
 
     func testJavaScriptHandlesEveryAttributeTheRendererChecksFor() {
@@ -97,6 +111,19 @@ final class PlumeBrowserRuntimeTests: XCTestCase {
                 XCTAssertTrue(js.contains(prefix), "Runtime does not handle \(prefix)")
             }
         }
+    }
+
+    func testDriveRuntimeExposesPublicApiAndDriveContract() {
+        // Behaviour is proven in the jsdom harness (PlumeClientRuntimeTests); this
+        // pins the public surface and keeps the no-arrow-function invariant.
+        let js = PlumeBrowserRuntime.javaScript
+        XCTAssertTrue(js.contains("Plume.apply"))
+        XCTAssertTrue(js.contains("Plume.visit"))
+        XCTAssertTrue(js.contains("Plume.morph"))
+        XCTAssertTrue(js.contains("plume-stream"))
+        XCTAssertTrue(js.contains("plume-frame"))
+        XCTAssertTrue(js.contains("X-Plume-Frame"))
+        XCTAssertFalse(js.contains("=>"), "shipped runtime must avoid arrow functions")
     }
 
     func testJavaScriptImplementsStateActionsAndPageActions() {

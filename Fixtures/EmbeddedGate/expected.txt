@@ -1,0 +1,2 @@
+<section><h1>Posts</h1><ul><li><a href="hello">1. Hello &amp; &lt;World&gt;</a></li><li><a href="second">2. Second</a></li></ul></section>
+<plume-stream action="append" target="posts"><template><li>new</li></template></plume-stream><plume-stream action="remove" target="flash"></plume-stream>
