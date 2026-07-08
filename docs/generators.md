@@ -7,7 +7,7 @@ automatically. Run them from the project root.
 
 | Command | Creates |
 | --- | --- |
-| `generate resource <Name> [field:type …]` | A full CRUD resource: model, controller (all seven actions), index/new/show/edit views, and a migration file (auto-discovered); prints the route to register. |
+| `generate resource <Name> [field:type …]` | A full CRUD resource: model, controller (all seven actions), index/new/show/edit views and a migration file (auto-discovered); prints the route to register. |
 | `generate auth` | Email + password auth: User model, register/login/logout/forgot/reset plus email verification; works for browser sessions **and** JSON APIs. |
 | `generate notifications` | Two-channel notifications: a `UserNotification` model (the in-app inbox) plus a `notify(...)` helper that also emails when the mailer is bound. |
 | `generate model <Name> [field:type …]` | An `@Model` type plus its migration file. |
@@ -15,7 +15,7 @@ automatically. Run them from the project root.
 | `generate migration <Name>` | A timestamped migration file (schema builder) under `Database/Migrations/`. |
 | `generate view <Name>` | A standalone Plume component (`Views/<Name>.plume`). |
 | `generate middleware <Name>` | A `Middleware` struct. |
-| `generate job <Name>` | A background `Job` under `Sources/App/Jobs/` — auto-registered on the next build (no manual wiring). |
+| `generate job <Name>` | A background `Job` under `Sources/App/Jobs/`, auto-registered on the next build (no manual wiring). |
 | `generate seeder <Name>` | A `Seeder` (in `Database/Seeders/`). |
 | `generate test <Name>` | A test suite in `Tests/AppTests/`. See [Testing](testing.md). |
 | `generate ci --provider <github\|gitlab\|forgejo>` | CI workflows (test on PR, deploy on push). See [Deploying](deploying.md). |
@@ -23,9 +23,9 @@ automatically. Run them from the project root.
 ## Field types
 
 `field:type` pairs accept `string` (the default), `text`, `int`, `int64`, `double`,
-`bool`, and `blob`. They map to the Swift property type and, in generated migrations,
+`bool` and `blob`. They map to the Swift property type and, in generated migrations,
 the SQL column type (`TEXT` / `INTEGER` / `REAL` / `BLOB`). Table and column names
-match what `@Model` derives (pluralized, snake_cased).
+match what `@Model` derives (pluralised, snake_cased).
 
 ## resource
 
@@ -50,7 +50,7 @@ It creates:
   own `Views/<Name>/` folder (PascalCase, like the rest of the tree) so the directory stays
   tidy as the app grows.
   (The `@component` names stay globally unique (`PostIndex`, `PostNew`, `PostShow`,
-  `PostEdit`) because they compile to top-level render functions; the folder just organizes
+  `PostEdit`) because they compile to top-level render functions; the folder just organises
   files.)
 - A model factory and a test suite (see [Testing](testing.md)).
 
@@ -62,7 +62,7 @@ The scaffold wires in the conveniences you'd otherwise add by hand:
 - **Validation with re-render**: `create` validates the input (`.required` on
   every field, plus `.integer`/`.decimal` for numeric ones); on failure it
   re-renders the index with status 422, the submitted values repopulated
-  (`value="{oldTitle}"`), and an inline `<span class="field-error">` message per
+  (`value="{oldTitle}"`) and an inline `<span class="field-error">` message per
   field via `input.errors.first("title")`. See [Forms](forms.md).
 - **Flash messages**: create/update/destroy redirect with
   `.flash("Post created")` (and "updated" / "deleted"), and the Index view renders
@@ -87,9 +87,9 @@ same way for both, so every route serves both kinds of client:
 plumekit generate auth
 ```
 
-It creates the `User`, `PasswordReset`, and `EmailVerification` models (in
+It creates the `User`, `PasswordReset` and `EmailVerification` models (in
 `Sources/App/Models/`; the `users` table is the source of truth),
-`Sources/App/Controllers/Auth.swift` (the authenticator, session manager, and an
+`Sources/App/Controllers/Auth.swift` (the authenticator, session manager and an
 `AuthController` with **register / login / logout / forgot-password / reset /
 verify**), the four page views in `Views/Auth/`, and the two email bodies in
 `Views/Emails/` (verification + password reset; emails are their own kind of view,
@@ -163,4 +163,4 @@ plumekit generate seeder Demo           # → Database/Seeders/DemoSeeder.swift;
 ```
 
 See [Controllers](controllers.md), [Plume views](plume-views.md),
-[Middleware](middleware.md), [Jobs](jobs.md), and the [CLI reference](cli.md).
+[Middleware](middleware.md), [Jobs](jobs.md) and the [CLI reference](cli.md).

@@ -45,7 +45,7 @@ let views = request.form.int("views") ?? 0
 ### Testing endpoints without a server
 
 Use `TestHTTPClient` to exercise routes and middleware in process. It builds a
-`Request`, calls `Application.handle(_:)`, and returns the normal `Response`:
+`Request`, calls `Application.handle(_:)` and returns the normal `Response`:
 
 ```swift
 let app = Application()

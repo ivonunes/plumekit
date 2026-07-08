@@ -1,6 +1,6 @@
 # CLI & configuration
 
-`plumekit` is the single CLI that scaffolds, runs, migrates, builds, and deploys your
+`plumekit` is the single CLI that scaffolds, runs, migrates, builds and deploys your
 app, and drives the Plume templating toolchain in-process. This page is the command
 and configuration reference.
 
@@ -9,7 +9,7 @@ and configuration reference.
 Every scaffolded project includes a committed `./plumekit` wrapper script. It reads
 the PlumeKit version your project resolves to from `Package.resolved` (the SwiftPM
 lock file), downloads the matching CLI release from
-GitHub on first use, verifies its checksum, caches it, and runs it. Contributors
+GitHub on first use, verifies its checksum, caches it and runs it. Contributors
 and CI need nothing installed beyond a Swift toolchain: run `./plumekit …` and you
 get the version your app builds against.
 
@@ -26,12 +26,12 @@ Overrides: `PLUMEKIT_BIN=/path/to/plumekit` (use a local build), `PLUMEKIT_VERSI
 | `plumekit migrate [path]` | Apply migrations against the native DB. `--local` / `--remote` target a Cloudflare D1 via wrangler. |
 | `plumekit seed [path]` | Run the app's seeders (same `--local` / `--remote`). |
 | `plumekit routes [path]` | List the app's registered routes. |
-| `plumekit generate <kind> …` | Scaffold a resource, model, controller, migration, view, middleware, job, seeder, test, auth, notifications, or CI. Alias: `g`. See [Generators](generators.md). |
+| `plumekit generate <kind> …` | Scaffold a resource, model, controller, migration, view, middleware, job, seeder, test, auth, notifications or CI. Alias: `g`. See [Generators](generators.md). |
 | `plumekit test [path]` | Run the app's test suite. |
 | `plumekit doctor` | Report which per-target tools are installed (Swift, wasm SDK, binaryen, wrangler, libpq, aws, docker). |
 | `plumekit mcp` | Run an MCP server (stdio) giving AI coding agents accurate PlumeKit APIs; see [MCP for AI agents](mcp.md). |
 | `plumekit build [path]` | Build the target(s) from `[build]` (or `--target cloudflare\|aws\|all`). |
-| `plumekit deploy [path]` | Migrate, (seed,) build, and deploy; see [Deploying](deploying.md). |
+| `plumekit deploy [path]` | Migrate, (seed,) build and deploy; see [Deploying](deploying.md). |
 
 The Plume templating commands (`compile`, `check`, `bundle`, `format`,
 `language-server`) are part of the same binary; see [Tooling](tooling/index.md).
@@ -60,7 +60,7 @@ build-tool plugin reads it on every `swift build` to generate the typed `Binding
 gate and the composition root; the CLI reads its `[build]` / `[deploy]` sections.
 
 ```toml
-# Which capabilities the app uses. Using one not declared here is a COMPILE error
+# Which capabilities the app uses. Using one not declared here is a compile error
 # (there's no accessor for it on request.bindings).
 [capabilities]
 kv       = true
@@ -111,8 +111,8 @@ different adapter with no app-code change; see [Bindings & drivers](bindings.md)
 
 ## `.env`
 
-`serve`, `dev`, `console`, `migrate`, and `seed` load a `.env` file from the project
-root into the environment (existing variables win), so `DATABASE_URL`, secrets, and
+`serve`, `dev`, `console`, `migrate` and `seed` load a `.env` file from the project
+root into the environment (existing variables win), so `DATABASE_URL`, secrets and
 other config are picked up without hand-exporting:
 
 ```sh

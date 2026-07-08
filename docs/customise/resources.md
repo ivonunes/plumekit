@@ -1,8 +1,8 @@
 # Resources
 
-Plume can collect page resources while rendering. A host application can then emit those resources as real CSS, JavaScript, and image files instead of forcing everything inline.
+Plume can collect page resources while rendering. A host application can then emit those resources as real CSS, JavaScript and image files instead of forcing everything inline.
 
-The important idea is locality: write the resource next to the markup that needs it, and let the host decide how to fingerprint, inject, optimise, or copy it.
+The important idea is locality: write the resource next to the markup that needs it, and let the host decide how to fingerprint, inject, optimise or copy it.
 
 ## Lifecycle
 
@@ -66,7 +66,7 @@ CSS files are supported too:
 @style(file: "components/card.css", scoped: true)
 ```
 
-Use inline styles when the CSS only makes sense next to the template. Use CSS files when the stylesheet is shared, large, or edited independently.
+Use inline styles when the CSS only makes sense next to the template. Use CSS files when the stylesheet is shared, large or edited independently.
 
 ## Scripts
 
@@ -135,7 +135,7 @@ Hosts can expose an `asset()` function to resolve theme or application files:
 
 Plume checks static asset references where the host provides enough information. The host decides the final public URL.
 
-Use `asset()` for files you want to reference from attributes, such as favicons, downloads, fonts, and images that do not need generated markup.
+Use `asset()` for files you want to reference from attributes, such as favicons, downloads, fonts and images that do not need generated markup.
 
 `asset()` works in **both** the interpreter and the **compiled** path. In a compiled template it is resolved **at build time** to a baked URL string literal (no runtime lookup in the Wasm build), so the argument must be a **string literal**. In PlumeKit it resolves to the content-hashed Plume bundle for the framework's own files (`asset("app.js")` → `/app.<hash>.js`, `asset("app.css")` → `/app.<hash>.css`) and passes your own `Public/` files through by path (`asset("logo.png")` → `/logo.png`).
 
@@ -152,7 +152,7 @@ Use `@image` when the host supports image generation:
 )
 ```
 
-Plume records the image reference and requested attributes. The host can then resolve the file, inspect dimensions, generate responsive variants, and emit the final `<img>` markup.
+Plume records the image reference and requested attributes. The host can then resolve the file, inspect dimensions, generate responsive variants and emit the final `<img>` markup.
 
 Common arguments:
 
@@ -169,4 +169,4 @@ Common arguments:
 
 Use `@image` when you want the host to produce the `<img>` element or add image metadata. Use `asset()` when you only need a URL.
 
-A host uses `asset()`, `@image`, `@style`, and `@script` to emit fingerprinted resources, typically under a path such as `/assets/plume/`.
+A host uses `asset()`, `@image`, `@style` and `@script` to emit fingerprinted resources, typically under a path such as `/assets/plume/`.

@@ -4,7 +4,7 @@ Persistent connections that push updates to subscribed clients. This is a differ
 execution model from the stateless request path: long-lived, stateful,
 message-driven. One platform-neutral `Channel` abstraction sits over the platform
 implementations: a Cloudflare **Durable Object**, a native **long-lived actor**
-(detailed below), and, through the same protocol, **AWS API Gateway WebSockets**
+(detailed below) and, through the same protocol, **AWS API Gateway WebSockets**
 (DynamoDB state + `postToConnection` fan-out). See [Portability](portability.md) and
 [Deploying to AWS Lambda](aws.md).
 
@@ -23,7 +23,7 @@ returns effects. Correctness comes from rebuilding state from storage on each
 message, so a hibernated Durable Object resumes safely.
 
 **Native long-lived actor.** A `ChannelHub` actor holds multiple
-WebSocket connections (SwiftNIO upgrade via the upgradable pipeline), fans out, and
+WebSocket connections (SwiftNIO upgrade via the upgradable pipeline), fans out and
 persists per-room state to disk, restoring it across a process restart. Same
 handler shape as the DO.
 

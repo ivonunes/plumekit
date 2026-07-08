@@ -1,14 +1,15 @@
 # Getting started
 
 PlumeKit is a Swift web framework that runs anywhere. You write an app once as a
-library of routes, and the same code runs two ways:
+library of routes, and the same code runs three ways:
 
-- **natively** on macOS/Linux for local development (`plumekit serve`), and
+- **natively** on macOS/Linux for local development (`plumekit serve`),
 - as a tiny **WebAssembly** module inside a **Cloudflare Worker**
-  (`plumekit build --target cloudflare`).
+  (`plumekit build --target cloudflare`), and
+- as an **AWS Lambda** function behind API Gateway (`plumekit build --target aws`).
 
 Nothing in your app names a platform. Databases, key/value stores, object storage,
-queues, secrets, outbound HTTP, and mail are reached through *capability bindings*;
+queues, secrets, outbound HTTP and mail are reached through *capability bindings*;
 a per-target `plumekit.toml` picks which adapter backs each one.
 
 This guide takes you from an empty directory to a running app that serves a route,
@@ -19,7 +20,7 @@ reads and writes a database, and deploys to a Worker.
 
 ## Install the CLI
 
-PlumeKit ships a single CLI, `plumekit`, that scaffolds, serves, migrates, and
+PlumeKit ships a single CLI, `plumekit`, that scaffolds, serves, migrates and
 builds your app, and drives the Plume templating toolchain in-process.
 
 ```sh
@@ -29,8 +30,8 @@ curl -fsSL https://install.plumekit.dev | sh
 ```
 
 Scaffolded projects include a committed **`./plumekit` wrapper** that downloads the
-matching CLI release automatically, so once you have a project, you and your CI only
-ever run `./plumekit …`, with no separate install needed. See the
+matching CLI release automatically. Once you have a project, you and your CI only
+ever run `./plumekit …`; there is no separate install. See the
 [CLI reference](../cli.md) for the full command and config surface.
 
 **Toolchain**: native development needs only a Swift 6 toolchain (6.3.2). Building
@@ -40,7 +41,7 @@ the Cloudflare Worker target additionally needs the
 (`brew install binaryen`), and Node + `wrangler`. `plumekit doctor` checks all of it.
 
 (Working from a source checkout instead? `git clone
-https://github.com/ivonunes/plumekit.git`, run `swift run plumekit …`, and pass
+https://github.com/ivonunes/plumekit.git`, run `swift run plumekit …` and pass
 `--path <checkout>` to `plumekit new` so the scaffold depends on the framework by
 path.)
 
@@ -52,7 +53,7 @@ cd myapp
 ```
 
 `plumekit new` is **interactive** at a terminal: it asks which capabilities to
-enable, your default build target, the database driver, whether to add a Dockerfile,
+enable, your default build target, the database driver, whether to add a Dockerfile
 and whether to generate CI. (Press enter to accept the defaults, or pipe/redirect
 input for a non-interactive scaffold.)
 
@@ -80,7 +81,7 @@ myapp/
 ```
 
 The generators add directories as you use them: `Models/`, `Controllers/`,
-`Middleware/`, and `Database/Migrations/` `Database/Seeders/`.
+`Middleware/`, `Database/Migrations/` and `Database/Seeders/`.
 
 Files under `Public/` are served as **static files** at their matching URL path
 (`Public/images/logo.png` at `/images/logo.png`),
@@ -131,7 +132,7 @@ public func buildApp() -> Application {
 ## Add a route
 
 Routes are registered with method helpers on `Application`: `get`, `post`, `put`,
-`patch`, `delete`, `head`, `options`, or `on(_:_:_:)` for an arbitrary method. A
+`patch`, `delete`, `head`, `options` or `on(_:_:_:)` for an arbitrary method. A
 handler is an `async throws` closure from `Request` to `Response`:
 
 ```swift
@@ -199,7 +200,7 @@ routes.
 ## Define a model
 
 Generate a model, or write one by hand. `@Model` reads your type at compile time
-and emits the schema, a row codec, and typed query columns:
+and emits the schema, a row codec and typed query columns:
 
 ```sh
 plumekit generate model Post title:string body:text published:bool
@@ -240,7 +241,7 @@ app.post("/posts") { request in
 
 Outside a request (migrations, seeders, tests) you pass the database explicitly, e.g.
 `post.save(in: db)`. See the [ORM](../orm.md) reference for persistence, the typed
-query builder, and relationships.
+query builder and relationships.
 
 A redirect can carry a one-time **flash message**, shown by the next page view and
 cleared automatically: `.redirect(to: "/posts").flash("Post created")`. See
@@ -285,7 +286,7 @@ plumekit migrate
 For a Cloudflare D1 database, `plumekit migrate --local` / `--remote` run the same
 migrations against it. Seeders work the same way (files under
 `Database/Seeders/`, run by `plumekit seed`). See [Migrations](../migrations.md) for
-the builder, altering tables, and rollbacks.
+the builder, altering tables and rollbacks.
 
 ## Serve it and hit it
 
@@ -302,7 +303,7 @@ curl http://127.0.0.1:8080/posts            # your rows
 
 While you develop, a thrown error doesn't leave you staring at a bare 500:
 `plumekit serve` and `plumekit dev` set `PLUMEKIT_ENV=development`, and the native
-server renders a full error page: the error's type and description, the request,
+server renders a full error page: the error's type and description, the request
 and your route table. In production (no env var) the same error is a clean 500;
 either way it's logged to stdout.
 
@@ -314,9 +315,9 @@ and native bindings; type `GET /posts` to dispatch a request without a server, o
 
 ## Deploy
 
-The same `buildApp()` ships to a Cloudflare Worker, an AWS Lambda, or a container,
+The same `buildApp()` ships to a Cloudflare Worker, an AWS Lambda or a container,
 whichever target you set as the `default` in `plumekit.toml`'s `[build]`. One command
-migrates, builds, and deploys:
+migrates, builds and deploys:
 
 ```sh
 plumekit deploy
@@ -324,14 +325,14 @@ plumekit deploy
 ```
 
 Or do it by hand: `plumekit build --target cloudflare` compiles your Plume
-templates, builds the `Worker` product to Wasm, optimizes it with `wasm-opt`, and
+templates, builds the `Worker` product to Wasm, optimises it with `wasm-opt` and
 emits a deployable bundle in `dist/cloudflare/` (the `app.wasm` module, a
 dependency-free `worker.mjs` bridging host bindings, and a `wrangler.toml`). The
 routes you tested natively now run at the edge, byte-for-byte the same.
 
 Your `wrangler.toml` is yours to customise (bindings, routes, custom domains,
 logging); build writes one on first run and reuses your copy afterwards. See
-[Deploying](../deploying.md) for the full workflow (Cloudflare, AWS, containers, and
+[Deploying](../deploying.md) for the full workflow (Cloudflare, AWS, containers and
 CI), and [Portability](../portability.md) for how the targets stay in lockstep.
 
 ## Rendering views with Plume
@@ -343,7 +344,7 @@ byte-identical natively and on the edge.
 
 The starter project already wires this up. `Views/Layout.plume` is a shared
 shell (a component with a `@slot`), and `Views/HomePage.plume` fills it: views
-split across files, one per page. `plumekit new`, `serve`, and `build` compile them
+split across files, one per page. `plumekit new`, `serve` and `build` compile them
 in-process (the Plume compiler is embedded in the CLI, so there is no separate
 install), and the scaffold's `/` handler calls the generated render function:
 
@@ -364,10 +365,10 @@ the no-JavaScript full-page-navigation baseline still works. See
 
 For the view-layer integration, see [Plume views in PlumeKit](../plume-views.md).
 For the templating language itself (output and expressions, components and slots,
-co-located styles/scripts/assets, and the tooling) read:
+co-located styles/scripts/assets and the tooling) read:
 
 - [Syntax](../syntax/index.md): the language reference.
 - [Components](../components/index.md): reusable markup with arguments and slots.
 - [Customise](../customise/resources.md): resources and behaviour.
 - [Embedding](../embedding/index.md): the Swift render APIs.
-- [Tooling](../tooling/index.md): checks, formatting, and editor support.
+- [Tooling](../tooling/index.md): checks, formatting and editor support.

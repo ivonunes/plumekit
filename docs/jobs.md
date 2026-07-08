@@ -11,8 +11,8 @@ struct LogJob: Job {
     static let name = "log"
     let message: String
     init(message: String) { self.message = message }
-    init(payload: [UInt8]) { self.message = decodeUTF8(payload) }   // deserialize
-    func payload() -> [UInt8] { encodeUTF8(message) }                // serialize
+    init(payload: [UInt8]) { self.message = decodeUTF8(payload) }   // deserialise
+    func payload() -> [UInt8] { encodeUTF8(message) }                // serialise
     func perform(_ context: Context) async throws {                 // the work
         await context.kv?.putString("last-job", message)            // jobs reach bindings
     }
@@ -22,16 +22,16 @@ struct LogJob: Job {
 try await LogJob(message: "hi").enqueue(on: request.bindings.queue)
 ```
 
-A job serializes its args to `[UInt8]`, reconstructs from them, and `perform`s with
+A job serialises its args to `[UInt8]`, reconstructs from them and `perform`s with
 a `Context`. Inside `perform`, capabilities are ambient too (`Post.save()`,
 `KV.current`), the same as a handler. `enqueue` wraps the job in a wire envelope
 (`[u16 nameLen][name][payload]`) and sends it on the queue.
 
-## Dispatch — jobs are auto-registered
+## Dispatch
 
 You don't wire jobs up by hand. **Every type conforming to `Job` under
-`Sources/App/Jobs/` is discovered at build time and registered** — any depth, so
-organize them into subfolders (`Jobs/Email/`, `Jobs/Billing/`) freely; order is
+`Sources/App/Jobs/` is discovered at build time and registered**, at any depth, so
+organise them into subfolders (`Jobs/Email/`, `Jobs/Billing/`) freely; order is
 irrelevant because jobs dispatch by name. Drop a file in and it runs.
 
 The consumer calls a generated `buildJobs()` (under `Sources/App/Generated/`, never
@@ -62,7 +62,7 @@ Two Cloudflare-specific details:
 ## Scheduled tasks
 
 Recurring work ("run this every N minutes / hourly / daily") rides the same core.
-Unlike jobs, schedules are **declared by hand in one place** — `registerSchedules(_
+Unlike jobs, schedules are **declared by hand in one place**: `registerSchedules(_
 schedule: inout Schedule)` in `Sources/App/Schedules.swift` (its own file, like
 `Routes.swift`):
 
@@ -100,6 +100,6 @@ Only the ticker differs per target; the schedule doesn't:
 - **AWS**: an EventBridge 1-minute rule sends the same envelope through the queue.
 
 The plumbing is generated: `buildSchedule()` wraps your `registerSchedules`, and the
-generated `buildJobs()` does `registry.include(buildSchedule())` — so the schedule's
+generated `buildJobs()` does `registry.include(buildSchedule())`, so the schedule's
 tick is a registered job on the queue-backed targets, while `PlumeServer.run(schedule:)`
 also ticks it natively. You only write `registerSchedules`.

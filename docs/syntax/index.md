@@ -1,6 +1,6 @@
 # Syntax
 
-Plume syntax is deliberately small. Templates stay close to HTML, and the extra syntax is reserved for values, control flow, reusable components, resources, and behaviour.
+Plume syntax is deliberately small. Templates stay close to HTML, and the extra syntax is reserved for values, control flow, reusable components, resources and behaviour.
 
 ## Output
 
@@ -10,7 +10,7 @@ Use `{expression}` for normal escaped output:
 <h1>{post.title}</h1>
 ```
 
-Expressions can start with values, literals, function calls, or filters:
+Expressions can start with values, literals, function calls or filters:
 
 ```plume
 {"Draft" | downcase}
@@ -32,7 +32,7 @@ that contains `{...}`.
 
 ## Expressions
 
-Expressions can read values from the context, local variables, loop variables, component arguments, and host functions:
+Expressions can read values from the context, local variables, loop variables, component arguments and host functions:
 
 ```plume
 {site.title}
@@ -41,7 +41,7 @@ Expressions can read values from the context, local variables, loop variables, c
 {asset("images/avatar.png")}
 ```
 
-Supported literals include strings, numbers, booleans, `nil`, `null`, `empty`, `blank`, and arrays:
+Supported literals include strings, numbers, booleans, `nil`, `null`, `empty`, `blank` and arrays:
 
 ```plume
 @let widths = [480, 960, 1440]
@@ -68,7 +68,7 @@ Use ternaries for small inline choices:
 <span>{post.title ? post.title : "Untitled"}</span>
 ```
 
-For conditionals, empty strings, empty arrays, `false`, `nil`, and `null` are falsey. Non-empty strings, non-empty arrays, numbers, dictionaries, and safe HTML are truthy.
+For conditionals, empty strings, empty arrays, `false`, `nil` and `null` are falsey. Non-empty strings, non-empty arrays, numbers, dictionaries and safe HTML are truthy.
 
 ## Locals
 
@@ -83,7 +83,7 @@ Use `@let` for local values:
 
 ## Conditionals
 
-Use `@if`, `else if`, and `else`:
+Use `@if`, `else if` and `else`:
 
 ```plume
 @if post.title {
@@ -174,7 +174,7 @@ The most common filters:
 - `join(separator)`, `sort(field)`, `where(field, value)`, `map(field)`: work with arrays.
 - `upcase`, `downcase`, `truncate(length)`, `slugify`: transform strings.
 
-See [Filters](filters.md) for the complete reference, covering every string, array, number, date, and output filter.
+See [Filters](filters.md) for the complete reference, covering every string, array, number, date and output filter.
 
 ## Methods
 
@@ -188,7 +188,7 @@ Some values also support method-style calls:
 {post.title.replace(":", " - ")}
 ```
 
-Useful methods include `contains`, `startsWith`, `endsWith`, `replace`, `replaceFirst`, `split`, `lowercased`, `uppercased`, and `slugify`.
+Useful methods include `contains`, `startsWith`, `endsWith`, `replace`, `replaceFirst`, `split`, `lowercased`, `uppercased` and `slugify`.
 
 ## Attributes
 

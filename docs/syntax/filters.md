@@ -73,7 +73,7 @@ Date filters accept ISO 8601 strings and Unix timestamps.
 
 ## Output
 
-- `default(value)`: substitute when the value is missing, an empty string, an empty array, or `false`. The number `0` is kept.
+- `default(value)`: substitute when the value is missing, an empty string, an empty array or `false`. The number `0` is kept.
 - `json`: encode the value as JSON.
 - `escape`: HTML-escape a string.
 - `escape_once`: HTML-escape without double-escaping existing entities.

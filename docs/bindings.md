@@ -71,8 +71,8 @@ See [Capability presence is a compile-time gate](#capability-presence-is-a-compi
 | Channels    | `Channel`     | **Durable Object**              | long-lived actor          | **API Gateway** (+ DynamoDB) |
 | Logging     | (closure)     | `console.log`                   | stdout                    | stdout (CloudWatch)       |
 
-The same handler runs against D1, SQLite, and RDS Postgres; against R2, the
-filesystem, and S3; natively (`plumekit serve`), on `wrangler dev`, and as a
+The same handler runs against D1, SQLite and RDS Postgres; against R2, the
+filesystem and S3; natively (`plumekit serve`), on `wrangler dev` and as a
 `provided.al2` Lambda. Each adapter conforms to the same protocol; nothing in the
 core or app names a platform type.
 
@@ -95,7 +95,7 @@ core or app names a platform type.
   adapters (D1/R2/KV) are wired in the Wasm worker composition and configured via
   `wrangler.toml`.
 - **Config** (connection strings, secrets, paths) is **runtime**, via a neutral
-  provider. Never a compiled-in value, never a direct `env` read in app code.
+  provider. It is never a compiled-in value and never a direct `env` read in app code.
 
 ### Secrets
 
@@ -134,7 +134,7 @@ app.get("/render/:id") { request in
 ```
 
 The `Cache` handle exposes `get(_:) async throws -> [UInt8]?`,
-`set(_:_:ttlSeconds:) async throws` (a `nil` TTL means "no explicit expiry"), and
+`set(_:_:ttlSeconds:) async throws` (a `nil` TTL means "no explicit expiry") and
 `delete(_:) async throws`, plus the UTF-8 convenience pair
 `getString`/`setString(_:_:ttlSeconds:)`. Declare it with `cache = true` under
 `[capabilities]` and select a driver in `plumekit.toml` (`cache = "..."`). The
@@ -159,7 +159,7 @@ DDL, `SERIAL` vs SQLite `AUTOINCREMENT`, is handled by Migrations.)
 ### Opt-in S3
 
 `PlumeS3` (S3 request signing via swift-crypto + URLSession; no vendor SDK) is a
-separate product that works with any S3-compatible object store (S3, R2, MinIO, and
+separate product that works with any S3-compatible object store (S3, R2, MinIO and
 others). Select it in `plumekit.toml` (`storage = "s3"`) and add
 `.product(name: "PlumeS3", package: "PlumeKit")` to the `Server` target; the
 generated composition reads `S3_ENDPOINT/REGION/BUCKET/ACCESS_KEY/SECRET_KEY`

@@ -24,7 +24,7 @@ app.options("/posts")       { _ in .status(204) }
 app.on(.get, "/legacy")     { _ in .text("via on()") }
 ```
 
-The supported methods are `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, and
+The supported methods are `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` and
 `OPTIONS`.
 
 ## Handlers
@@ -154,7 +154,7 @@ Routing distinguishes three cases:
   this method → **405 Method Not Allowed**.
 - **Not found**: no route matches the path → **404 Not Found**.
 
-## The Request
+## The request
 
 A handler receives an immutable `Request` value (the router populates its
 `parameters` before dispatch):
@@ -184,9 +184,9 @@ Bindings are reached through `request.bindings` (typed, non-optional, generated 
 the capabilities you declare in `plumekit.toml`) or `request.context` (optional). See
 [Bindings & drivers](bindings.md).
 
-## The Response
+## The response
 
-Build responses with `Response`'s convenience constructors, or the initializer for
+Build responses with `Response`'s convenience constructors, or the initialiser for
 full control:
 
 ```swift
@@ -194,7 +194,7 @@ full control:
 .text("nope", status: 404)
 .html("<h1>hi</h1>")                    // text/html; charset=utf-8
 .html(bytes: renderedHTML)             // pre-rendered UTF-8 bytes (e.g. Plume)
-.json("{\"ok\":true}")                 // pre-serialized JSON string
+.json("{\"ok\":true}")                 // pre-serialised JSON string
 .json(.object([("ok", .bool(true))]))  // from a JSONValue
 .status(204)                           // bare status, empty body
 .redirect(to: "/posts")               // 303 See Other by default
@@ -202,7 +202,7 @@ full control:
 Response(status: 201, headers: headers, body: bytes)   // full control
 ```
 
-`Response` exposes `status`, `headers`, `body` (`[UInt8]`), `bodyText`, and
+`Response` exposes `status`, `headers`, `body` (`[UInt8]`), `bodyText` and
 `reasonPhrase`. Set headers before returning:
 
 ```swift

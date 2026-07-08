@@ -9,7 +9,7 @@ service behind the existing capability protocols.
 
 This page covers the AWS adapters, the `[targets.aws]` manifest profile, the environment it
 reads, packaging with `plumekit build --target aws`, deploying to Lambda + API
-Gateway, and local testing against LocalStack.
+Gateway and local testing against LocalStack.
 
 ## Three runtimes, one core
 
@@ -137,7 +137,7 @@ resulting `bootstrap` will not run on Lambda itself.
 
 1. **Provision the services** the `[targets.aws]` profile references: an S3 bucket, the SQS
    queue, SSM parameters for your secrets, the DynamoDB tables (KV, cache with a TTL
-   attribute, and channel state), an RDS Postgres instance, and the SES identity.
+   attribute and channel state), an RDS Postgres instance, and the SES identity.
 2. **Create the function** on the `provided.al2` runtime with `function.zip` as the
    code and `bootstrap` as the handler. Set the environment variables from the table
    above; the execution role supplies the AWS credentials.
@@ -152,7 +152,7 @@ resulting `bootstrap` will not run on Lambda itself.
 
 ## Static files (`Public/`)
 
-Your app's `Public/` directory (styles, images, and the content-hashed Plume bundle
+Your app's `Public/` directory (styles, images and the content-hashed Plume bundle
 `app.*`) is copied to `dist/aws/public` by the build. On AWS, static files are not
 served by the Lambda: you **upload them to S3 and front them with CloudFront**, which
 routes the asset paths (`/app.<hash>.css`, `/app.<hash>.js`, your own files) to S3 and
@@ -181,16 +181,16 @@ builds the Hello app for AWS, and drives its Lambda against the local endpoints:
 ./support/aws-localstack.sh
 ```
 
-S3, SQS, SSM, and DynamoDB run on LocalStack, so storage, queue, secrets, KV, cache,
+S3, SQS, SSM and DynamoDB run on LocalStack, so storage, queue, secrets, KV, cache
 and the API Gateway channel store are all exercised locally against the same adapters
 you deploy.
 
 ## See also
 
-- [Deploying](deploying.md): `plumekit deploy`, CI, and containers; AWS is one of its
+- [Deploying](deploying.md): `plumekit deploy`, CI and containers; AWS is one of its
   three targets.
 - [Portability](portability.md): how the one-core/many-adapters invariant holds across
-  native, Cloudflare, and AWS.
+  native, Cloudflare and AWS.
 - [Bindings & drivers](bindings.md): the capability protocols and the per-target
   adapter table (native, Cloudflare, AWS).
 - [Channels](channels.md): the platform-neutral real-time protocol driving all three

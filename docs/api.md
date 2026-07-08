@@ -3,7 +3,7 @@
 A separate, opt-in surface for building a real API as a versioned contract. Content
 negotiation already lets web endpoints answer HTML or JSON; the API surface is
 different: a namespace with its own middleware, structured errors, pagination, rate
-limiting, and allow-list serialization. Apps opt in; existing negotiated endpoints
+limiting and allow-list serialisation. Apps opt in; existing negotiated endpoints
 are unchanged. Built on token auth. Works the same on every target.
 
 ## Versioning + token auth
@@ -18,13 +18,13 @@ app.get("/api/v1/posts") { ... }
 ```
 
 `requireAPIToken` accepts only a bearer token (the identity middleware resolves
-it); cookie auth is rejected on the API surface. Per-route authorization uses the
+it); cookie auth is rejected on the API surface. Per-route authorisation uses the
 auth policies (`request.authorize(...)`). Versioning is additive-safe; a breaking
 change is a new version (`/api/v2`).
 
 ## Structured error envelope
 
-Machine-readable, never HTML:
+The envelope is machine-readable, never HTML:
 
 ```json
 {"error":{"code":"validation_failed","message":"the request is invalid",
@@ -39,7 +39,7 @@ Validation failures map to `fields`. 401 (`unauthorized`), 422
 
 `Query.paginate(limit:offset:)` over the query builder returns a `Page` (it fetches
 `limit+1` to compute `hasMore` without a second query); `paginatedJSON` wraps the
-allow-list-serialized items + metadata:
+allow-list-serialised items + metadata:
 
 ```json
 {"data":[{"id":1,"title":"First","views":0}],
@@ -52,7 +52,7 @@ allow-list-serialized items + metadata:
 window); a structured **429** past the limit. Platform-neutral: swap the counter by
 replacing the middleware. On by default for the API group.
 
-## Serialization allow-list
+## Serialisation allow-list
 
 A model's JSON is an explicit allow-list it declares via `APIRepresentable.apiJSON()`,
 never "encode the whole model". The example `Post` exposes `id`, `title`, `views`
@@ -98,5 +98,5 @@ guard SignedURL.verify(request, key: key, nowEpochSeconds: now) else {
 ```
 
 HMAC-SHA256 over the path + query, compared in constant time. Tampering with the
-path, the parameters, or the expiry fails verification. `expiresAt` (epoch seconds)
+path, the parameters or the expiry fails verification. `expiresAt` (epoch seconds)
 is optional; without it the link doesn't expire.

@@ -10,22 +10,22 @@ code. This page is the mental model; the feature docs are the detail.
 PlumeKit is split into a platform-agnostic core and thin per-platform adapters.
 
 - **`PlumeCore`** is the framework core: routing, request/response, middleware, the
-  capability seam, auth, and the API surface. It uses no Foundation and no
+  capability seam, auth and the API surface. It uses no Foundation and no
   runtime reflection (bytes are `[UInt8]`), so it compiles to a tiny WebAssembly
   module as readily as it does a native binary.
 - **`PlumeORM`** is the `@Model` macro, the row codec, the typed
-  query builder, and the migrator. It also compiles to Wasm, and it talks only to
-  the SQL capability, so a model runs unchanged on native SQLite, Postgres, and
+  query builder and the migrator. It also compiles to Wasm, and it talks only to
+  the SQL capability, so a model runs unchanged on native SQLite, Postgres and
   Cloudflare D1.
 - **`PlumeServer`** is the native adapter: a SwiftNIO HTTP/1.1 server, the native
-  binding drivers (SQLite, filesystem object storage, in-process queue, and so on), the
+  binding drivers (SQLite, filesystem object storage, in-process queue and so on), the
   `plumekit serve` runtime, and the interactive console.
 - **`PlumeWorker`** is the Cloudflare adapter: the Wasm byte marshalling and the
-  async host-binding bridge that lets the module call Cloudflare's KV, D1, R2, and
+  async host-binding bridge that lets the module call Cloudflare's KV, D1, R2 and
   queues.
 - **`Plume`** / **`PlumeRuntime`** are the templating language: the compiler and the
   render runtime. They are one component of the framework, not its
-  center, and are usable on their own.
+  centre, and are usable on their own.
 
 Your app is a library of routes plus two thin entry points. Both entry points call
 the same `buildApp()`:
@@ -40,7 +40,7 @@ the same `buildApp()`:
 ```
 
 The core knows nothing about NIO or Cloudflare. An adapter decodes a transport
-request into a `Request`, calls `Application.handle(_:)`, and serializes the
+request into a `Request`, calls `Application.handle(_:)` and serialises the
 returned `Response` back onto the wire.
 
 ## The capability seam
@@ -48,7 +48,7 @@ returned `Response` back onto the wire.
 Your handlers never name a platform type: no `env`, no `D1Database`, no
 `KVNamespace`. Instead they reach host services through **capability bindings**:
 small concrete structs of async closures carried on each request's `Context` (KV,
-database, storage, queue, HTTP client, secrets, mailer, broadcaster, and a log
+database, storage, queue, HTTP client, secrets, mailer, broadcaster and a log
 function). Each capability is a protocol (the *adapter contract*) plus a concrete
 handle that wraps any conforming adapter via an opaque `some` generic.
 
@@ -81,7 +81,7 @@ change, no platform conditional. On Cloudflare the bindings are configured in
 
 ## The request lifecycle
 
-A request flows through the middleware stack, into a matched route, and back out as
+A request flows through the middleware stack, into a matched route and back out as
 a response:
 
 ```

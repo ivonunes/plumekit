@@ -1,4 +1,4 @@
-# Client Scripts
+# Client scripts
 
 `@script` blocks use Plume's client script language: a small, declarative way to wire up page behaviour that compiles to plain JavaScript. This page is the language reference. For when to reach for scripts at all, see [Behaviour](behaviour.md).
 
@@ -21,7 +21,7 @@
 - `let name = value`: a constant.
 - `var name = value`: a mutable variable.
 
-Values can be strings, numbers, booleans, element queries, and expressions built from them.
+Values can be strings, numbers, booleans, element queries and expressions built from them.
 
 ## Queries
 
@@ -52,9 +52,9 @@ Values can be strings, numbers, booleans, element queries, and expressions built
 }
 ```
 
-The target can be a selector string, a queried element, or `page`. Inside a handler, `event` provides `event.value` for form controls, `event.target`, and `event.preventDefault()`.
+The target can be a selector string, a queried element or `page`. Inside a handler, `event` provides `event.value` for form controls, `event.target` and `event.preventDefault()`.
 
-## Element Methods
+## Element methods
 
 - `element.addClass(name)`
 - `element.removeClass(name)`
@@ -67,19 +67,19 @@ The target can be a selector string, a queried element, or `page`. Inside a hand
 - `element.scrollTo()` and `element.scrollToTop()`
 - `element.focus()` and `element.blur()`
 
-## Page Values And Actions
+## Page values and actions
 
 - `page.addClass`, `page.removeClass`, `page.toggleClass`: class helpers on the document element.
 - `page.scrollTo(...)` and `page.scrollToTop(...)`: scrolling helpers.
 - `page.scrollY` and `page.width`: read-only values for conditions.
 
-## Control Flow
+## Control flow
 
 - `if condition { ... } else { ... }`
 - `for item in items { ... }`
-- Ternaries and `&&`, `||`, and `!` work in expressions.
+- Ternaries and `&&`, `||` and `!` work in expressions.
 
-## Scoped Scripts
+## Scoped scripts
 
 Inside `@script(scoped)`, `root` is the rendered fragment's top-level element, and the script runs once per rendered fragment. See [Resources](resources.md).
 
@@ -93,8 +93,8 @@ When you need browser APIs outside this language, drop down explicitly:
 }
 ```
 
-Raw JavaScript is emitted as a module and does not get `root`, `page`, or `on` blocks.
+Raw JavaScript is emitted as a module and does not get `root`, `page` or `on` blocks.
 
 ## Errors
 
-Client scripts are checked at template-check time. Unsupported statements and methods are reported with file, line, and column, so typos fail the build instead of failing in the browser.
+Client scripts are checked at template-check time. Unsupported statements and methods are reported with file, line and column, so typos fail the build instead of failing in the browser.

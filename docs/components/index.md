@@ -19,7 +19,7 @@ Component names use PascalCase:
 }
 ```
 
-Arguments can be positional, named, or mixed. Named arguments are clearer once a component accepts more than one optional value.
+Arguments can be positional, named or mixed. Named arguments are clearer once a component accepts more than one optional value.
 
 ## APIs
 
@@ -31,7 +31,7 @@ Keep the first argument the thing the component renders, then make options named
 
 This keeps call sites readable as components grow. Use defaults for options that should usually disappear from the call site.
 
-Prefer slots for real content and arguments for data or small display options. If a caller needs to pass headings, paragraphs, lists, or buttons, a slot usually reads better than a long string argument.
+Prefer slots for real content and arguments for data or small display options. If a caller needs to pass headings, paragraphs, lists or buttons, a slot usually reads better than a long string argument.
 
 ## Defaults
 
@@ -77,7 +77,7 @@ Slots can include fallback content:
 
 The fallback renders only when the caller does not pass trailing content.
 
-## Named Slots
+## Named slots
 
 Use named slots when a component has multiple content areas:
 
@@ -150,7 +150,7 @@ Components can call other components:
 }
 ```
 
-Keep components focused. A component that owns layout, data selection, styling, and interaction all at once is harder to reuse than a component with one clear job.
+Keep components focused. A component that owns layout, data selection, styling and interaction all at once is harder to reuse than a component with one clear job.
 
 ## Errors
 

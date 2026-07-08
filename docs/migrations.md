@@ -5,7 +5,7 @@ explicit `up` (and an optional `down` to reverse it). Migrations run in order, o
 each, and are discovered automatically, so you never maintain a central list.
 
 They talk only to the neutral `Database`, so the same migrations run on native SQLite,
-Cloudflare D1, and Postgres; the dialect travels with the handle.
+Cloudflare D1 and Postgres; the dialect travels with the handle.
 
 ## Writing a migration
 
@@ -39,7 +39,7 @@ let createPosts = Migration(
 )
 ```
 
-Columns are `text`, `integer`, `real`, `boolean`, `uuid`, `blob`, and `id()` for the
+Columns are `text`, `integer`, `real`, `boolean`, `uuid`, `blob` and `id()` for the
 primary key; each takes `nullable: true` for an optional column. Non-nullable columns
 get `NOT NULL`. Spelling the schema out keeps the migration a **frozen record**: it
 does not read the live `@Model`, so editing a model later never rewrites past
@@ -64,7 +64,7 @@ let addSlug = Migration(
 )
 ```
 
-`renameTable`, `dropIndex`, and `addReference` round out the set. Renaming and dropping
+`renameTable`, `dropIndex` and `addReference` round out the set. Renaming and dropping
 columns need SQLite 3.25+/3.35+; Cloudflare D1 and recent SQLite have both.
 
 ## Raw SQL

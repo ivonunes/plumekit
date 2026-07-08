@@ -10,13 +10,13 @@ conscious opt-out. Works on every target, including the Cloudflare Wasm build.
 |---|---|---|---|
 | Authentication | proving who you are | `PasswordAuthenticator` (PBKDF2) | sessions, policies |
 | Session/Identity | carrying identity across requests | `SessionManager` + cookie/bearer | authentication, policies |
-| Authorization | what you may do | `Policy` mechanism (no model) | authentication, sessions |
+| Authorisation | what you may do | `Policy` mechanism (no model) | authentication, sessions |
 
 The layers don't reference each other's types, so each swaps independently: a
 non-password method flows through the same session machinery, and the same
 authenticator works across two different session stores.
 
-## Identity: `currentUser` from cookie OR bearer
+## Identity: `currentUser` from cookie or bearer
 
 `request.currentUser` (the subject id) resolves identically from a signed cookie
 session (browser) or an `Authorization: Bearer` token (native/API), never
@@ -41,7 +41,7 @@ still runs one hash (no user-enumeration timing leak). `register` returns
 `.created(subject)` / `.emailTaken` as a value rather than throwing. Argon2id/bcrypt
 are the documented production swap (a native `PasswordHasher`).
 
-## Authorization: a place and a shape, not a model
+## Authorisation: a place and a shape, not a model
 
 `Policy` ships the mechanism; the app owns the rules (no RBAC/ownership/tenant baked
 in):
@@ -60,8 +60,8 @@ struct AccountPolicy: Policy {
 
 ## Protecting a route group
 
-To put a whole section behind a login, add `requireAuth()` as group middleware — no
-per-handler check:
+To put a whole section behind a login, add `requireAuth()` as group middleware, with
+no per-handler check needed:
 
 ```swift
 app.group("/admin", middleware: [requireAuth()]) { admin in

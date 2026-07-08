@@ -17,11 +17,11 @@ channels) is a neutral protocol with a concrete handle. Each target
 supplies its own adapters:
 
 - **Native**: SQLite or Postgres, filesystem object storage, an in-memory cache, an
-  in-process queue, environment secrets, and a long-lived actor for channels.
+  in-process queue, environment secrets and a long-lived actor for channels.
 - **Cloudflare**: D1, R2, Workers KV (durable, and again as a cache), Queues, `env`
-  secrets, and a Durable Object per channel.
+  secrets and a Durable Object per channel.
 - **AWS**: RDS Postgres, S3, DynamoDB (durable KV, and again as a TTL cache), SQS,
-  SSM Parameter Store secrets, SES mail, and API Gateway WebSockets per channel. Wired
+  SSM Parameter Store secrets, SES mail and API Gateway WebSockets per channel. Wired
   from the `[targets.aws]` profile as `Composition.awsContext()`, exactly like the native
   composition. See [Deploying to AWS Lambda](aws.md).
 
@@ -45,8 +45,8 @@ once, at the protocol or ORM layer, never in app code:
 | Postgres folds identifiers to lowercase | Column matching is case-insensitive (`asciiEqualFold`); SQL identifiers are case-insensitive anyway. |
 
 Because the dialect is carried by the adapter and selected by the manifest
-(`database = "postgres"`), the same `@Model`, query builder, and migrations run
-unchanged on SQLite, D1, and Postgres.
+(`database = "postgres"`), the same `@Model`, query builder and migrations run
+unchanged on SQLite, D1 and Postgres.
 
 ## Real-time channels are portable too
 
@@ -54,7 +54,7 @@ Channels are the hardest thing to keep portable, because the runtimes are
 structurally different: a Cloudflare Durable Object holds per-channel state and
 can't `await` a store mid-handler, while the native runtime is a long-lived actor.
 The `Channel` protocol is shaped for the stricter of the two (a synchronous handler
-over a pre-loaded store whose effects, i.e. writes, deferred SQL, and pushes, the
+over a pre-loaded store whose effects, i.e. writes, deferred SQL and pushes, the
 adapter applies), so the same `Channel` code drives both. That same shape drives a
 **third** runtime unchanged: on AWS the connection and per-channel state live in
 DynamoDB and the adapter fans out with API Gateway's `postToConnection`, with no
@@ -70,7 +70,7 @@ Scaffolded apps have a `Public/` directory. Your app references an asset by the
 - **Native** (`plumekit serve`): the server serves any file under `Public/` at its
   URL path (`Public/images/logo.png` →
   `/images/logo.png`). It is path-traversal-safe, sets `Content-Type` by file
-  extension, and sends a `Cache-Control` header. Static files take priority for GET;
+  extension and sends a `Cache-Control` header. Static files take priority for GET;
   a miss falls through to your routes.
 - **Cloudflare**: `plumekit build --target cloudflare` copies `Public/` →
   `dist/cloudflare/public`, and the generated `wrangler.toml` gets an `[assets]`
@@ -96,24 +96,24 @@ code: portability enforced as a build error, not discovered at runtime.
 
 ## The Wasm constraints, in practice
 
-Your handlers, models, and views compile to Embedded-Swift Wasm for the Cloudflare
+Your handlers, models and views compile to Embedded-Swift Wasm for the Cloudflare
 target, which brings a few concrete rules for your own code:
 
-- **No Foundation, no runtime reflection.** PlumeKit's JSON, row codec, and form
+- **No Foundation, no runtime reflection.** PlumeKit's JSON, row codec and form
   parsing are all explicit for this reason; your code should not reach for
   `Codable`/`JSONEncoder`.
 - **Native `String` operations now work.** `String ==` / `!=`, `hasPrefix` /
   `hasSuffix`, `lowercased()` / `uppercased()`, `Dictionary<String, _>`, and
   `Character`/grapheme iteration all link and run in the guest with **full,
-  native-identical Unicode semantics** (canonical equivalence, real case mapping —
+  native-identical Unicode semantics** (canonical equivalence, real case mapping,
   not byte approximations). This works because `plumekit build --target cloudflare`
   links Swift's Unicode data tables (`libswiftUnicodeDataTables.a`) into the Wasm
-  build automatically — no app opt-in. The tables are pulled in only when your code
+  build automatically, with no app opt-in. The tables are pulled in only when your code
   actually uses these operations, and only the referenced slices, so the cost is
   small (≈40 KB compressed for `==`; the whole table set is ~0.75 MB uncompressed,
   well inside the Workers size limits). `String.split(separator:)` works too. Framework
   internals still compare bytes (`Plume.equal`, `utf8Equal`) so an app that never uses
-  these operations stays minimal — reach for the byte helpers only when you want to
+  these operations stays minimal. Reach for the byte helpers only when you want to
   avoid pulling the tables in a size-critical path.
 - **`import _Concurrency`** is required in any file using async.
 - **32-bit `Int`.** Use `Int64` for values that may exceed 2^31 (e.g. epoch

@@ -7,7 +7,7 @@ along the way you'll use the pieces you'd reach for every day:
 - **routing through a controller**: the conventional RESTful actions, wired in one call,
 - **Plume views**: HTML templates split across files, with a shared layout,
 - **the ORM**: an `@Model` type, explicit migrations, typed queries,
-- **forms**: reading a POST, validating it, and re-rendering errors,
+- **forms**: reading a POST, validating it and re-rendering errors,
 - **flash messages**: a one-time notice after a redirect.
 
 It should take about 20 minutes. Every snippet is copy-paste-ready. If you just want
@@ -68,8 +68,8 @@ final class Bookmark: Model {
 }
 ```
 
-`@Model` reads the type at compile time and emits the table schema, a row codec, and
-typed query columns. The table name is the pluralized, snake-cased type name: here,
+`@Model` reads the type at compile time and emits the table schema, a row codec and
+typed query columns. The table name is the pluralised, snake-cased type name: here,
 `bookmarks`.
 
 Migrations are individual files under `Sources/App/Database/Migrations/`. They run in
@@ -101,8 +101,8 @@ let createBookmarks = Migration(
 )
 ```
 
-The builder covers creating, altering, renaming, and dropping tables, columns,
-foreign keys, and indexes. For anything it doesn't, run `db.query("...")` directly.
+The builder covers creating, altering, renaming and dropping tables, columns,
+foreign keys and indexes. For anything it doesn't, run `db.query("...")` directly.
 
 Apply it:
 
@@ -113,7 +113,7 @@ Apply it:
 ```
 
 The `Migrator` records what has run in a `schema_migrations` ledger, so re-running is
-a no-op. See [Migrations](../migrations.md) for altering tables, rollbacks, and
+a no-op. See [Migrations](../migrations.md) for altering tables, rollbacks and
 seeders.
 
 ## 3. A page, split across view files
@@ -190,13 +190,13 @@ import PlumeRuntime
 import PlumeORM
 
 struct BookmarksController: Controller {
-    // GET /bookmarks — list newest first, and show the add form.
+    // GET /bookmarks: list newest first and show the add form.
     func index(_ request: Request) async throws -> Response {
         let bookmarks = try await Bookmark.all().order(by: Bookmark.id, .descending).all()
         return .view(bookmarksPage(bookmarks: bookmarks))
     }
 
-    // POST /bookmarks — add one, or re-render the form with an error.
+    // POST /bookmarks: add one, or re-render the form with an error.
     func create(_ request: Request) async throws -> Response {
         let title = request.form["title"] ?? ""
         let url = request.form["url"] ?? ""
@@ -209,7 +209,7 @@ struct BookmarksController: Controller {
         return .redirect(to: "/bookmarks").flash("Bookmark added")
     }
 
-    // DELETE /bookmarks/:id — remove one.
+    // DELETE /bookmarks/:id removes one.
     func destroy(_ request: Request) async throws -> Response {
         if let bookmark = try await Bookmark.find(request) {
             try await bookmark.delete()
@@ -242,8 +242,8 @@ func registerRoutes(_ app: Application) {
 ```
 
 `resources("bookmarks", …)` wires `GET /bookmarks` → `index`, `POST /bookmarks` →
-`create`, and `DELETE /bookmarks/:id` → `destroy` (plus `show`/`update` if you add
-them). Replace the starter `/`, `/hello`, and `/count` demo routes with these two,
+`create` and `DELETE /bookmarks/:id` → `destroy` (plus `show`/`update` if you add
+them). Replace the starter `/`, `/hello` and `/count` demo routes with these two,
 and delete the now-unused `Views/HomePage.plume`. CSRF protection is already wired in
 `buildApp()` (`App.swift`), so there's nothing to add there.
 
@@ -284,7 +284,7 @@ renders a Plume view, forms POST to actions, validation re-renders, and the ORM
 persists.
 
 If a handler throws while you're developing, `dev` shows a full error page (the
-error, the request, and your route table) instead of a bare 500. In production it's a
+error, the request and your route table) instead of a bare 500. In production it's a
 clean 500.
 
 ## Where to go next
@@ -295,10 +295,10 @@ You've used the core of PlumeKit. From here:
   [Validations](../validations.md).
 - **Pagination**: `Bookmark.all().paginate(page: 1, per: 20)` returns a `Page` with
   `nextURL`/`previousURL` and totals. See the [ORM](../orm.md).
-- **Auth**: `plumekit generate auth` scaffolds registration, login, and sessions. See
+- **Auth**: `plumekit generate auth` scaffolds registration, login and sessions. See
   [Auth](../auth.md).
 - **Deploy it**: `./plumekit deploy` builds and ships to your configured target
-  (Cloudflare Worker, AWS Lambda, or a container). See [Deploying](../deploying.md).
+  (Cloudflare Worker, AWS Lambda or a container). See [Deploying](../deploying.md).
 
 The same app you just built runs unchanged on the native server and on Cloudflare;
 see [Portability](../portability.md).

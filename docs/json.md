@@ -2,7 +2,7 @@
 
 JSON plus `Accept`-based content negotiation. Foundation's
 `Codable`/`JSONEncoder` use runtime reflection, which is unavailable under Embedded
-Swift, so PlumeKit's JSON is a concrete value tree serialized and parsed by byte.
+Swift, so PlumeKit's JSON is a concrete value tree serialised and parsed by byte.
 It works identically on the native server and the Wasm worker.
 
 ## JSONValue
@@ -13,10 +13,10 @@ let body = JSONValue.object([
     ("title", .string("Hello")),
     ("tags", .array([.string("a"), .string("b")])),
 ])
-return .json(body)            // Response.json serializes it
+return .json(body)            // Response.json serialises it
 ```
 
-`JSONValue` (null/bool/int/double/string/array/ordered-object) serializes byte-wise
+`JSONValue` (null/bool/int/double/string/array/ordered-object) serialises byte-wise
 (escapes only what JSON requires; UTF-8 passes through) and parses via a
 recursive-descent parser. `parseJSON(bytes)`/`parseJSON(string)` returns a
 `JSONValue?`; read it with `json["key"]`, `.stringValue`, `.intValue`, etc.
@@ -51,7 +51,7 @@ func index(_ request: Request) async throws -> Response {
 ```
 
 `request.wantsJSON` (an `Accept` check), `request.hasJSONBody`
-(`Content-Type`), and `request.json()` (parse the body). A controller serves the
+(`Content-Type`) and `request.json()` (parse the body). A controller serves the
 same resource as JSON or HTML from one action.
 
 

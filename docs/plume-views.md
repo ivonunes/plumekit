@@ -9,7 +9,7 @@ The same rendering runs natively (`plumekit serve`) and on Workers (Wasm), byte-
 
 `plumekit` **embeds the Plume compiler** (a library dependency of the CLI), so it
 compiles templates **in-process**: there is no separate Plume install and no
-`PLUME_PATH`. `plumekit new`, `serve`, `console`, and
+`PLUME_PATH`. `plumekit new`, `serve`, `console` and
 `build` all run the embedded compiler:
 
 ```
@@ -61,7 +61,7 @@ existing buffer, the fast path the compiler uses to compose components together.
 `{item.name}` is HTML-escaped by default, so `Hello & <World>` renders as
 `Hello &amp; &lt;World&gt;`; escaping behaves identically on the edge.
 
-## Organizing views
+## Organising views
 
 `plumekit compile` recurses into subfolders, so group views however keeps the directory
 tidy as the app grows: a shared `Layout` and partials at the root, a folder per resource
@@ -82,7 +82,7 @@ Views/
 
 Folders are PascalCase like the rest of the tree. `plumekit generate resource` follows
 this automatically: each resource's views land in `Views/<Name>/`. The folder is purely
-for organization: every `@component` compiles to a **top-level** render function, so its
+for organisation: every `@component` compiles to a **top-level** render function, so its
 name must be unique across the whole tree (`PostIndex`, not just `Index`). Generated files
 are named by path (`Post/Index.plume` → `Post.Index.plume.swift`), so same-named files in
 different folders never collide.

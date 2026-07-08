@@ -2,7 +2,7 @@
 
 The `plumekit` CLI ships an **MCP server** that gives AI coding agents (Claude Code,
 Codex, OpenCode, …) accurate, structured access to PlumeKit (its APIs, your project's
-configuration, and the docs) so they write correct code.
+configuration and the docs) so they write correct code.
 
 ## What it provides
 
@@ -85,7 +85,7 @@ if the CLI is on your PATH). Point it at that command per the agent's MCP config
   `CLAUDE.md`): *"This is a PlumeKit app. Use the plumekit MCP `api_reference` tool for
   its APIs before writing code."*
 - Run the agent from the **project root** so `project_info` finds `plumekit.toml`.
-  (`api_reference` and `search_docs` work anywhere — the docs are embedded in the
+  (`api_reference` and `search_docs` work anywhere: the docs are embedded in the
   binary, so no framework checkout is needed.)
 - Pair it with the [tutorial](start/tutorial.md) and [CLI reference](cli.md) for
   humans on the team.

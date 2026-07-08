@@ -1,10 +1,10 @@
 # Behaviour
 
-Plume is not trying to turn every website into an app. Its interactive layer is for small, local behaviour: disclosures, menus, filters, sliders, page transitions, and progressive enhancement.
+Plume is not trying to turn every website into an app. Its interactive layer is for small, local behaviour: disclosures, menus, filters, sliders, page transitions and progressive enhancement.
 
 When you are embedding Plume yourself, [Embedding](../embedding/index.md) explains when these features need the runtime.
 
-## Choose Tool
+## Choosing a layer
 
 Use the smallest layer that describes the behaviour:
 
@@ -113,7 +113,7 @@ Use `page.measure` when an interaction needs live element geometry but CSS shoul
 
 By default, two `into` values receive the measured element's `x` and `width`. Pass `properties: ['y', 'height']` when you need different measurements.
 
-Available properties include `x`, `y`, `width`, `height`, `top`, `left`, `right`, `bottom`, `viewportX`, `viewportY`, `centerX`, and `centerY`.
+Available properties include `x`, `y`, `width`, `height`, `top`, `left`, `right`, `bottom`, `viewportX`, `viewportY`, `centerX` and `centerY`.
 
 ## Viewport
 
@@ -148,7 +148,7 @@ Use `@script` when an interaction needs more than a single action:
 }
 ```
 
-Client scripts support `let`, `var`, `if`, `else`, `for item in items`, `on target.event` blocks, query helpers, class helpers, text and attribute helpers, and scroll helpers. See [Client Scripts](client-scripts.md) for the full language reference. Use `@script(language: "javascript")` when you need raw browser APIs.
+Client scripts support `let`, `var`, `if`, `else`, `for item in items`, `on target.event` blocks, query helpers, class helpers, text and attribute helpers, and scroll helpers. See [Client scripts](client-scripts.md) for the full language reference. Use `@script(language: "javascript")` when you need raw browser APIs.
 
 Keep scripts close to the markup they enhance. If the script belongs to one component instance, use `@script(scoped)`. If it coordinates the whole page, put it in a page or layout template.
 
@@ -172,21 +172,21 @@ Put it in a layout template when the whole site should use it.
 
 Available options:
 
-- `root` — the selector for the element swapped on navigation (default `"body"`).
-- `viewTransitions` — animate swaps with the View Transitions API when the
+- `root`: the selector for the element swapped on navigation (default `"body"`).
+- `viewTransitions`: animate swaps with the View Transitions API when the
   browser supports it (default `true`).
-- `scroll` — `"top"`, `"preserve"`, or `"none"` (default `"top"`).
-- `minimumDuration` — a minimum visit duration in milliseconds, useful to let a
+- `scroll`: `"top"`, `"preserve"` or `"none"` (default `"top"`).
+- `minimumDuration`: a minimum visit duration in milliseconds, useful to let a
   leave animation finish (default `0`).
-- `progressBar` — show a slim progress bar at the top of the viewport while a
+- `progressBar`: show a slim progress bar at the top of the viewport while a
   visit or intercepted form submission is in flight (default `true`). Set
   `progressBar: false` to disable it.
-- `progressBarDelay` — how long a request must run, in milliseconds, before the
+- `progressBarDelay`: how long a request must run, in milliseconds, before the
   bar appears (default `500`), so fast navigations never flash it.
 
-The progress bar needs no app CSS — the runtime injects its own namespaced
+The progress bar needs no app CSS: the runtime injects its own namespaced
 style (`.plume-progress-bar`, 3px tall, fixed to the top of the viewport). To
-match your brand, override its color from plain CSS with a custom property:
+match your brand, override its colour from plain CSS with a custom property:
 
 ```css
 :root {

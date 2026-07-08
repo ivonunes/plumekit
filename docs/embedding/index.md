@@ -1,6 +1,6 @@
 # Embedding
 
-Plume is a Swift package. Host applications provide templates, context values, functions, components, and resource handling.
+Plume is a Swift package. Host applications provide templates, context values, functions, components and resource handling.
 
 ## Render
 
@@ -20,7 +20,7 @@ let html = try template.render([
 
 Use `render` when you only need HTML.
 
-Use `sourceName` when you have one. Diagnostics, editor tooling, scoped resources, and host-side file resolution are easier to understand when Plume knows which file is being rendered:
+Use `sourceName` when you have one. Diagnostics, editor tooling, scoped resources and host-side file resolution are easier to understand when Plume knows which file is being rendered:
 
 ```swift
 let template = try PlumeTemplate(
@@ -31,7 +31,7 @@ let template = try PlumeTemplate(
 
 ## Resources
 
-Use `renderResult` when the host needs collected styles, scripts, state, or navigation declarations:
+Use `renderResult` when the host needs collected styles, scripts, state or navigation declarations:
 
 ```swift
 let result = try template.renderResult(context)
@@ -44,9 +44,9 @@ print(result.navigation)
 print(result.requiresRuntime)
 ```
 
-The host decides how resources are emitted. A host typically turns collected styles and scripts into fingerprinted files, emits responsive images, and injects runtime scripts only when needed.
+The host decides how resources are emitted. A host typically turns collected styles and scripts into fingerprinted files, emits responsive images and injects runtime scripts only when needed.
 
-Use `renderResult` for any template that may contain `@style`, `@script`, `@image`, `@state`, event bindings, or `@navigation`.
+Use `renderResult` for any template that may contain `@style`, `@script`, `@image`, `@state`, event bindings or `@navigation`.
 
 ## Components
 
@@ -102,7 +102,7 @@ Templates call the function like any other expression:
 <link rel="stylesheet" href="{asset('site.css')}">
 ```
 
-Use functions for host-specific behaviour such as asset resolution, URL generation, image helpers, or formatting values that should remain outside the template language.
+Use functions for host-specific behaviour such as asset resolution, URL generation, image helpers or formatting values that should remain outside the template language.
 
 ## Diagnostics
 
@@ -136,7 +136,7 @@ This parses each component once instead of once per checked file.
 
 ## Runtime
 
-Emit the Plume runtime only when `result.requiresRuntime` is true. Static templates, components, styles, scripts, assets, and images do not need it unless the page also uses state, event bindings, browser actions, or navigation.
+Emit the Plume runtime only when `result.requiresRuntime` is true. Static templates, components, styles, scripts, assets and images do not need it unless the page also uses state, event bindings, browser actions or navigation.
 
 Plume ships the runtime and the scoped-style rewriter as public API, so hosts do not need to implement the client-side contract themselves:
 
@@ -154,19 +154,19 @@ for style in result.styles {
 
 Write `PlumeBrowserRuntime.javaScript` to a file, or inline it, on pages that require the runtime. Use `PlumeCSSScoper.scope` to apply a scoped style's scope attribute to its CSS before emitting it.
 
-When `@navigation` is enabled, the runtime intercepts same-origin links, fetches the next page, swaps the configured root element, updates the document title, loads missing Plume styles and module scripts, uses View Transitions where available, and falls back to a normal page load on errors.
+When `@navigation` is enabled, the runtime intercepts same-origin links, fetches the next page, swaps the configured root element, updates the document title, loads missing Plume styles and module scripts, uses View Transitions where available and falls back to a normal page load on errors.
 
-Navigation works best when the configured root exists on every participating page. Downloads, external sites, anchors, feeds, and custom protocols should keep their normal browser behaviour.
+Navigation works best when the configured root exists on every participating page. Downloads, external sites, anchors, feeds and custom protocols should keep their normal browser behaviour.
 
-## Host Shape
+## Host shape
 
 A small host usually needs these pieces:
 
 - A loader for template source files.
 - A loader for component source files.
-- A context builder that turns application data into dictionaries, arrays, strings, numbers, booleans, and `PlumeSafeHTML`.
+- A context builder that turns application data into dictionaries, arrays, strings, numbers, booleans and `PlumeSafeHTML`.
 - Host functions such as `asset()`.
-- A resource emitter for collected styles, scripts, images, and runtime files.
+- A resource emitter for collected styles, scripts, images and runtime files.
 
 Start with `render()` while prototyping. Move to `renderResult()` when templates begin declaring resources or interactivity.
 
@@ -178,6 +178,6 @@ Plume renders templates and records resource declarations. A host application is
 - Supplying context data.
 - Marking trusted HTML as `PlumeSafeHTML`.
 - Providing functions such as `asset()`.
-- Resolving `@style(file:)`, `@script(file:)`, and `@image` references.
+- Resolving `@style(file:)`, `@script(file:)` and `@image` references.
 - Emitting collected styles and scripts.
 - Emitting the runtime when `requiresRuntime` is true.

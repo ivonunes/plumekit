@@ -9,7 +9,7 @@ to the browser. It has two layers:
   `Plume` global, so any transport can drive the page without Plume knowing the
   transport.
 
-Plume defines and drives the DOM only. `visit`, frames, and forms just `fetch` a
+Plume defines and drives the DOM only. `visit`, frames and forms just `fetch` a
 URL and apply whatever comes back; `apply` takes an envelope from *any* source.
 How a request reaches a server, and what server answers, is not Plume's concern.
 
@@ -42,7 +42,7 @@ Plume.apply(
 );
 ```
 
-The envelope may come from a fetch response, a WebSocket message, an SSE event, or
+The envelope may come from a fetch response, a WebSocket message, an SSE event or
 be hand-built; Plume does not care.
 
 ## `Plume.visit(url, options?)`
@@ -67,7 +67,7 @@ Configure it through `@navigation`:
 ```
 
 `progressBar: false` disables it; `progressBarDelay` tunes the threshold in
-milliseconds. The color is overridable from plain app CSS — the bar paints with
+milliseconds. The colour is overridable from plain app CSS. The bar paints with
 `background: var(--plume-progress-color, #0076ff)`, so:
 
 ```css
@@ -106,6 +106,6 @@ no-JS path always works.
 
 `replace`/`update` swap elements wholesale. `morph` (also `Plume.morph(target,
 html)`) diffs the new markup into the target **in place**, idiomorph-style:
-matching elements by `id` then position, syncing attributes, and recursing. It
-preserves the focused element, its text selection, and scroll position, so a live
+matching elements by `id` then position, syncing attributes and recursing. It
+preserves the focused element, its text selection and scroll position, so a live
 update never interrupts a user who is typing.

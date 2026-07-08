@@ -6,7 +6,7 @@ errors. The same rules run on native SQLite and Cloudflare D1.
 ## Declaring rules
 
 Rules are concrete values holding **closures** (not keypaths, which don't
-compile under embedded wasm), so they declare *which field*, *how to read it*,
+compile under embedded wasm), so they declare *which field*, *how to read it*
 and *what to check*:
 
 ```swift
@@ -84,7 +84,7 @@ app.post("/signup") { request in
 urlencoded form. Rules: `.required`, `.email`, `.integer`, `.decimal`, `.min`/`.max`
 (numeric), `.minLength`/`.maxLength`, `.oneOf`, `.sameAs`, and `.check(message, predicate)`
 for anything custom. An empty optional field is skipped; an empty required field reports
-"is required". `input.errors.jsonValue` is a ready-to-serialize `{"field": ["message"]}`
+"is required". `input.errors.jsonValue` is a ready-to-serialise `{"field": ["message"]}`
 object for a 422 body, and `input.string`/`int`/`bool` return the validated values.
 
 For HTML forms, `input.errors.first("email")` returns the field's first message, or

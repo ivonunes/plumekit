@@ -4,7 +4,7 @@ Plume has two back-ends over **one** language and one front-end:
 
 - The **interpreting renderer** powers static-site generation. It is dynamic and
   feature-complete (scoped styles, client scripts, the asset pipeline, host
-  functions, `@state`, and the full filter library).
+  functions, `@state` and the full filter library).
 - The **compiling back-end** lowers a template to Swift source that compiles under
   Embedded Swift: a typed `render` function that writes HTML bytes. This is what a
   request-time view layer (for example, a Cloudflare Workers Wasm isolate) uses
@@ -63,7 +63,7 @@ Swift.
 Generated render functions are **pure and synchronous**: already-materialised
 data in, bytes out. No `await`, no I/O, no concurrency. Supported:
 
-- Text, escaped interpolation (`{x}`), and the raw opt-out (`{x | raw}`).
+- Text, escaped interpolation (`{x}`) and the raw opt-out (`{x | raw}`).
 - `@if` / `@else if` / `@else`, `@for ... in ...` (with `forloop`), `@let`,
   `@if let` optional binding. Conditions must be `Bool` (`swiftc` enforces this),
   so write `@if posts.count > 0` or `@if flag`, not a bare non-boolean value.
@@ -74,15 +74,15 @@ data in, bytes out. No `await`, no I/O, no concurrency. Supported:
   `contains`.
 
 All text handling is **byte-wise UTF-8**. The compiled back-end never relies on
-`String ==`, case-folding, or Unicode collation, because those fail to *link*
+`String ==`, case-folding or Unicode collation, because those fail to *link*
 under Embedded Swift (the Unicode tables are absent). String equality is compiled
 to a byte-wise comparison; human-text collation is not this layer's job.
 
 ## Behaviour hooks and the asset bundle
 
-`@style`, `@script`, `@state`, and `@navigation` are split between build time and
+`@style`, `@script`, `@state` and `@navigation` are split between build time and
 request time. Their heavy parts (scoped CSS, the client-script-language → JS
-compilation, and the Plume client runtime) are compiled once into a
+compilation and the Plume client runtime) are compiled once into a
 content-hashed bundle (`plumekit bundle -o DIR`, or the `PlumeAssetBundle` API). The
 render function emits only the HTML-side hooks:
 
@@ -129,6 +129,6 @@ Using these in a compiled template is a checker error:
 
 `support/embedded-gate.sh` is the link-and-run gate: it runs `plumekit compile` on
 `Fixtures/EmbeddedGate`, then builds the generated code with the Embedded-Swift
-Wasm SDK, **links an executable**, runs it under Node's WASI, and asserts the
+Wasm SDK, **links an executable**, runs it under Node's WASI and asserts the
 rendered bytes. Linking (not just building a library) is required because Embedded
 link-time failures are invisible to a library-only build.

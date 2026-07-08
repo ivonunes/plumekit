@@ -1,6 +1,6 @@
 # Deploying
 
-The same `buildApp()` deploys three ways: a Cloudflare Worker, an AWS Lambda, or a
+The same `buildApp()` deploys three ways: a Cloudflare Worker, an AWS Lambda or a
 container running the native server, selected by your `[build]` target in
 `plumekit.toml`. One command builds and ships it.
 
@@ -33,7 +33,7 @@ What each target does:
 ## Cloudflare & `wrangler.toml`
 
 `plumekit build --target cloudflare` emits a deployable bundle in `dist/cloudflare/`
-(the `app.wasm` module, a dependency-free `worker.mjs`, and `wrangler.toml`). It also
+(the `app.wasm` module, a dependency-free `worker.mjs` and `wrangler.toml`). It also
 copies your `Public/` directory to `dist/cloudflare/public`, and the generated
 `wrangler.toml` carries an `[assets]` block (`directory = "./public"`) so Cloudflare
 serves a matching path (`/app.<hash>.css`, `/app.<hash>.js`, your images) directly;
@@ -41,7 +41,7 @@ every other request runs the Worker. See [Static files](#static-files-public).
 
 Your `wrangler.toml` is **yours to own**. The first build writes one at the project
 root from a template; after that, build reuses your copy, so custom domains,
-logging/observability, `[vars]`, compatibility flags, and extra bindings you add are
+logging/observability, `[vars]`, compatibility flags and extra bindings you add are
 never overwritten. Commit it. (Only `worker.mjs`, the JSPI glue, is regenerated each
 build.)
 

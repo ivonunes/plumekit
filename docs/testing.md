@@ -3,7 +3,7 @@
 PlumeKit apps test natively with [Swift Testing](https://developer.apple.com/documentation/testing).
 The scaffold generates a `Tests/AppTests/` target and the **PlumeTesting** module, which
 gives each test a fresh, migrated in-memory database, a `TestHTTPClient`, model
-factories, and response assertions. Run them with:
+factories and response assertions. Run them with:
 
 ```sh
 plumekit test        # → swift test
@@ -11,7 +11,7 @@ plumekit test        # → swift test
 
 ## The harness
 
-`TestApp.boot` creates a fresh `:memory:` SQLite database, applies your migrations, and
+`TestApp.boot` creates a fresh `:memory:` SQLite database, applies your migrations and
 binds everything (database, in-memory KV/cache/storage) into a `TestHTTPClient`. Build a
 new one per test so state never leaks:
 
@@ -34,7 +34,7 @@ import PlumeTesting   // re-exports PlumeCore + PlumeORM
 ```
 
 `@testable import App` lets tests reach your models and helpers (which are internal to
-the App module). `TestApp` exposes `app`, `client`, `database`, and `context`.
+the App module). `TestApp` exposes `app`, `client`, `database` and `context`.
 
 ## The client
 

@@ -31,7 +31,7 @@ automatically.
 **Scaffolded apps enable this by default**: `buildApp()` registers `csrfProtection()`,
 `plumekit new` writes a fresh `CSRF_SECRET` into `.env`, and forms carry the token via
 the `@csrf` directive. Put `@csrf` inside any `<form>` and it renders the hidden
-`_csrf` field with the right token. Nothing to pass in, nothing to wire up:
+`_csrf` field with the right token. There is nothing to pass in and nothing to wire up:
 
 ```plume
 <form method="post" action="/posts">
@@ -60,7 +60,7 @@ row codec and the JSON codec.
 ## Re-rendering with old input and inline errors
 
 The no-JS baseline for a failed form POST: re-render the page with **422**, the
-submitted values repopulated, and a message next to each bad field.
+submitted values repopulated and a message next to each bad field.
 `input.errors.first("title")` returns the field's first message, or `""` when the
 field is clean, so a template can gate on it directly:
 
@@ -83,7 +83,7 @@ guard input.isValid else {
 `.integer`/`.decimal` for numeric ones. See
 [Validations](validations.md#request-validation) for the rule set.
 
-## Negotiated responses (success AND errors)
+## Negotiated responses (success and errors)
 
 One handler, three representations, chosen by negotiation (`X-Plume-Navigation` →
 stream; `Accept: application/json` → JSON; else full page):
@@ -105,5 +105,5 @@ Errors negotiate too: an API client gets JSON, not HTML.
 ## The client runtime
 
 The stream path uses Plume's `StreamEnvelope` and the `@navigation` client runtime,
-which intercepts `submit`, falls back to a normal POST with no JS, and applies
+which intercepts `submit`, falls back to a normal POST with no JS and applies
 `<plume-stream>` responses.

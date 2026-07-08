@@ -1,6 +1,6 @@
 # Mailer
 
-Transactional email is a portable capability, alongside the database, KV, object storage, and
+Transactional email is a portable capability, alongside the database, KV, object storage and
 the rest. Your app builds an `EmailMessage` and hands it to the mailer binding; the
 adapter configured for the target decides how it is actually delivered. The protocol
 names no provider and no transport, so the same send runs unchanged on the native
@@ -39,7 +39,7 @@ app.post("/signup") { request in
 }
 ```
 
-For an HTML body, a reply-to address, or reuse, build an `EmailMessage`:
+For an HTML body, a reply-to address or reuse, build an `EmailMessage`:
 
 ```swift
 let message = EmailMessage(
@@ -61,7 +61,7 @@ optional.
 Scaffolded apps include a small `Mailer` extension that sends a Plume-rendered HTML
 body with a plain-text fallback for clients that don't show HTML. Write the email as
 a `.plume` component (e.g. `@component WelcomeEmail(name: String) { … }`), render
-it, and pass it in:
+it and pass it in:
 
 ```swift
 try await Mailer.current.send(
@@ -98,7 +98,7 @@ public struct Mailer: Sendable {
 ```
 
 A failed send throws `MailError`, which carries a human-readable `message`
-describing the failure (connection, auth, or provider rejection). Wrap sends in
+describing the failure (connection, auth or provider rejection). Wrap sends in
 `do`/`catch` if a delivery failure should not fail the request:
 
 ```swift
@@ -154,9 +154,9 @@ If both `SMTP_USERNAME` and `SMTP_PASSWORD` are set, the client authenticates wi
 
 ## Cloudflare adapter
 
-On the Cloudflare Worker target, the mailer serializes the message to JSON and hands
+On the Cloudflare Worker target, the mailer serialises the message to JSON and hands
 it to a `host_email_send` host import; the generated `worker.mjs` shim POSTs that
-JSON to an HTTP email provider you configure (MailChannels, Resend, SendGrid, or any
+JSON to an HTTP email provider you configure (MailChannels, Resend, SendGrid or any
 provider) via the `MAIL_API_URL` and `MAIL_API_KEY` bindings in `wrangler.toml`. The
 provider-neutral JSON payload looks like:
 

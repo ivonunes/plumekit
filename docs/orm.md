@@ -267,15 +267,15 @@ throwing aborts it; `didSave` / `didDelete` run after the row is written / remov
 Inside a handler, ORM calls take the current request's database implicitly: the
 framework binds the request's context around dispatch. On native builds that binding
 is **task-local** (`RequestContext.withValue`), so several apps dispatching in one
-process — e.g. parallel test suites, each with its own `TestApp` — never see each
+process (e.g. parallel test suites, each with its own `TestApp`) never see each
 other's database. Long-lived non-request code (server startup, migrations, the
 console, schedule ticks) assigns `RequestContext.current = context` instead; that
 writes a process-global fallback which reads fall back to when no task-local binding
 is in scope. (The embedded-wasm guest keeps a plain global for both because
-`@TaskLocal.withValue` doesn't compile under embedded wasm — safe there, since the
+`@TaskLocal.withValue` doesn't compile under embedded wasm: safe there, since the
 guest handles one request per instance. A transaction, which needs per-task routing
 even within one app, uses a task-local that only exists in the native build; see
 [Transactions](#transactions).)
 
 Outside a request there is no ambient binding, which is why migrations, seeders,
-tests, and background jobs pass the handle explicitly with `in: db`.
+tests and background jobs pass the handle explicitly with `in: db`.

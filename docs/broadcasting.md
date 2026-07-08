@@ -11,7 +11,7 @@ server and Cloudflare.
 
 A model declares its broadcast target + payloads by conforming to `Broadcastable`,
 naming a `ChannelID` and the pushes: a fragment rendered with no request, plus a
-typed payload. No socket, no DO:
+typed payload, with no socket handling and no Durable Object code:
 
 ```swift
 extension Post: Broadcastable {
@@ -56,7 +56,7 @@ JSON payload (native/API subscribers); each subscriber receives only its kind.
 
 ## Signed subscriptions (mandatory)
 
-Broadcasting makes channel authorization a real attack surface: a client must not
+Broadcasting makes channel authorisation a real attack surface: a client must not
 subscribe to an arbitrary channel and receive another entity's broadcasts. The
 server mints a **channel-scoped, signed token** (`ChannelToken.mint`, HMAC-SHA256
 with the signing secret); the channel verifies it at subscribe and **rejects

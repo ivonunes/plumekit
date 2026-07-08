@@ -1,8 +1,8 @@
 # Tooling
 
-The `plumekit` CLI provides Plume's templating commands for checking, formatting, compiling, and editor integration.
+The `plumekit` CLI provides Plume's templating commands for checking, formatting, compiling and editor integration.
 
-For the full command list (including `serve`, `dev`, `migrate`, `deploy`, and `generate`) and the `plumekit.toml` reference, see [The CLI](../cli.md). If you need to install the CLI first, see [Start](../start/getting-started.md).
+For the full command list (including `serve`, `dev`, `migrate`, `deploy` and `generate`) and the `plumekit.toml` reference, see [The CLI](../cli.md). If you need to install the CLI first, see [Start](../start/getting-started.md).
 
 ## Commands
 
@@ -33,7 +33,7 @@ plumekit format --check theme
 
 Formatting also canonicalises alias spellings to one Swift-spelled name per
 transform (for example `upcase` → `uppercased`, `startsWith` → `hasPrefix`,
-`null` → `nil`, and `@slot(name: x)` → `@slot(x)`). Both spellings keep parsing;
+`null` → `nil` and `@slot(name: x)` → `@slot(x)`). Both spellings keep parsing;
 the formatter rewrites to the canonical one. String-literal contents are left
 untouched.
 

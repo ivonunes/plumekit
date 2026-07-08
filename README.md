@@ -1,9 +1,9 @@
 # PlumeKit
 
-A delightful Swift web framework that runs anywhere. Write your routes, models, and views
+A delightful Swift web framework that runs anywhere. Write your routes, models and views
 once: the same code runs natively on your own server, compiles to WebAssembly
-for Cloudflare Workers, and deploys to AWS Lambda. No rewrites, no platform
-branches.
+for Cloudflare Workers and deploys to AWS Lambda, with nothing to rewrite and
+no per-platform branches.
 
 ```swift
 @Model final class Post: Model {
@@ -22,7 +22,7 @@ app.get("/posts") { _ in
 
 Batteries included: routing, a type-safe ORM with migrations, the **Plume**
 templating language, auth, validations, background jobs, scheduled tasks,
-real-time channels, transactions, flash messages, and one-command deploys.
+real-time channels, transactions, flash messages and one-command deploys.
 All of it works out of the box and behaves identically on every target.
 
 ## Install
