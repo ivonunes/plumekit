@@ -100,6 +100,10 @@ function getInstance() {
 
     // SQL via D1. Decode the (sql, params) request, run it, encode typed rows;
     // two-call read like KV. The binding name is `DB` (set in wrangler.toml).
+    // Reads go through raw() for POSITIONAL rows: all()'s name-keyed objects
+    // collapse duplicate column names (SELECT u.id, c.id ...), silently
+    // dropping columns that the native SQLite driver preserves. Writes keep
+    // run(), the only call that reports meta (changes / last_row_id).
     host_db_query: new WebAssembly.Suspending(async (ctx, reqPtr, reqLen) => {
       const slot = ctxTable.get(ctx);
       const db = slot?.env?.DB;
@@ -107,8 +111,14 @@ function getInstance() {
       const { sql, params } = decodeQueryRequest(new Uint8Array(mem(), reqPtr, reqLen).slice());
       try {
         const stmt = params.length ? db.prepare(sql).bind(...params) : db.prepare(sql);
-        const out = await stmt.all();
-        slot.stash = encodeQueryResult(out.results || [], out.meta || {});
+        if (isReadStatement(sql)) {
+          const raw = await stmt.raw({ columnNames: true });
+          const cols = raw.length ? raw[0].map(String) : [];
+          slot.stash = encodeQueryRows(cols, raw.slice(1), {});
+        } else {
+          const out = await stmt.run();
+          slot.stash = encodeQueryResult(out.results || [], out.meta || {});
+        }
         return slot.stash.length;
       } catch (e) {
         // A D1 error (constraint/syntax) must NOT reject the JSPI promise — that would
@@ -371,7 +381,24 @@ function decodeQueryRequest(bytes) {
   return { sql, params };
 }
 
+// Statements that only read rows are safe to run via D1's raw() (which loses
+// meta but keeps duplicate column names). A WITH prefix can front a write
+// (WITH cte AS (...) DELETE ...), so those only count as reads when no write
+// verb appears anywhere.
+function isReadStatement(sql) {
+  const s = sql.replace(/^\s*(--[^\n]*\n|\/\*[\s\S]*?\*\/|\s+)*/g, "");
+  if (/^(select|values|explain|pragma)\b/i.test(s)) return true;
+  return /^with\b/i.test(s) && !/\b(insert|update|delete|replace)\b/i.test(s);
+}
+
+// Object-keyed rows (from all()/run()) reduce to positional via the first
+// row's keys — fine for writes and RETURNING, where names can't collide.
 function encodeQueryResult(rows, meta) {
+  const cols = rows.length ? Object.keys(rows[0]) : [];
+  return encodeQueryRows(cols, rows.map((r) => cols.map((c) => r[c])), meta);
+}
+
+function encodeQueryRows(cols, rows, meta) {
   const a = [];
   const dv = new DataView(new ArrayBuffer(8));
   const u8 = (v) => a.push(v & 0xff);
@@ -383,13 +410,12 @@ function encodeQueryResult(rows, meta) {
   // 32-bit length: D1 TEXT values (article bodies, JSON) exceed 64 KiB; a u16 prefix
   // would wrap and desync the whole result. Pairs with the guest's u32 text reader.
   const lp = (s) => { const b = enc.encode(s); u32(b.length); for (const x of b) a.push(x); };
-  const cols = rows.length ? Object.keys(rows[0]) : [];
   u16(cols.length);
   for (const c of cols) lp(c);
   u32(rows.length);
   for (const row of rows) {
-    for (const c of cols) {
-      const v = row[c];
+    for (let i = 0; i < cols.length; i++) {
+      const v = row[i];
       if (v === null || v === undefined) u8(0);
       else if (typeof v === "bigint") { u8(1); i64(v); }
       else if (typeof v === "boolean") { u8(1); i64(v ? 1 : 0); }
@@ -479,6 +505,8 @@ export class ChannelDO {
     this.instance = null;      // rebuilt lazily; constructor re-runs after hibernation
     this.promisingChannel = null;
     this.stash = null;
+    this.kv = null;            // in-memory state cache, loaded once per isolate lifetime
+    this.room = null;          // the "__room" value, cached to skip redundant reads/writes
   }
 
   // Per-DO wasm instance. No Suspending imports — JSPI doesn't instantiate in a DO
@@ -527,6 +555,10 @@ export class ChannelDO {
     // as-is. Kept in the hibernation attachment (2KB limit — keep subjects lean).
     const subject = tokenSubject(token);
     const kind = url.searchParams.get("kind") === "payload" ? 1 : 0;
+    // Keepalive: the runtime answers a literal "ping" with "pong" WITHOUT waking
+    // a hibernated DO — no request billed, no dispatch. Clients hold idle
+    // sockets open with these; anything meaningful still uses real messages.
+    this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     const pair = new WebSocketPair();
     this.state.acceptWebSocket(pair[1]);   // Hibernation API
     pair[1].serializeAttachment({ kind, subject, room });
@@ -599,11 +631,38 @@ export class ChannelDO {
 
     // Remember the room id host-side (hidden "__room" key, stripped from the
     // guest snapshot) so the alarm() handler — which has no request — knows it.
-    if (eventKind !== 3) await this.state.storage.put("__room", utf8.encode(room));
+    // Written only when it changes: a DO hosts one room for life, so re-putting
+    // it per event would bill a storage write for every message.
+    if (eventKind !== 3 && this.room !== room) {
+      await this.state.storage.put("__room", utf8.encode(room));
+      this.room = room;
+    }
+
+    // The room's live state, loaded ONCE per isolate lifetime (cold start /
+    // post-hibernation wake) and maintained write-through in the effects pass —
+    // never re-listed per event: on SQLite-backed DOs every storage.list()
+    // bills one row read per stored key, which multiplied by a fast alarm tick
+    // is ruinous. Empty values are deletion tombstones written before the
+    // effects wire's "empty = delete" convention existed — purge them from
+    // storage on sight (bulk deletes, 128 keys per call).
+    if (this.kv === null) {
+      const loaded = await this.state.storage.list();
+      const kv = new Map();
+      const dead = [];
+      for (const [key, value] of loaded) {
+        if (key.startsWith("__")) continue;
+        const bytes = (value instanceof Uint8Array) ? value : utf8.encode(String(value));
+        if (bytes.length === 0) dead.push(key);
+        else kv.set(key, bytes);
+      }
+      for (let i = 0; i < dead.length; i += 128) {
+        await this.state.storage.delete(dead.slice(i, i + 128));
+      }
+      this.kv = kv;
+    }
 
     // Encode the state snapshot: [u16 n]([u16 keyLen][key][u32 valLen][val])*
-    const all = await this.state.storage.list();
-    for (const key of [...all.keys()]) { if (key.startsWith("__")) all.delete(key); }
+    const all = this.kv;
     const u16 = (n) => [n & 0xff, (n >> 8) & 0xff];
     const u32 = (n) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
     const u64 = (n) => {                       // BigInt-safe little-endian
@@ -664,11 +723,27 @@ export class ChannelDO {
     const rU16 = () => { const v = result[p] | (result[p + 1] << 8); p += 2; return v; };
     const rU32 = () => { const v = result[p] + result[p + 1] * 256 + result[p + 2] * 65536 + result[p + 3] * 16777216; p += 4; return v; };
     const rU64 = () => { let v = 0n; for (let i = 0n; i < 8n; i++) { v |= BigInt(result[p]) << (8n * i); p += 1; } return v; };
+    // Store writes: last write per key wins (a handler often saves the same
+    // record several times in one dispatch — one billed write, not N). Keys
+    // starting "~" are VOLATILE: they live in this isolate's memory only and
+    // never touch billed storage (lost on hibernation — by design, for
+    // respawnable simulation state). Empty value = delete, per the wire's
+    // deletion convention.
     const writeCount = rU16();
+    const finalWrites = new Map();
     for (let i = 0; i < writeCount; i++) {
       const kl = rU16(); const key = decoder.decode(result.slice(p, p + kl)); p += kl;
       const vl = rU32(); const val = result.slice(p, p + vl); p += vl;
-      await this.state.storage.put(key, val);
+      finalWrites.set(key, val);
+    }
+    for (const [key, val] of finalWrites) {
+      if (val.length === 0) {
+        if (!key.startsWith("~")) await this.state.storage.delete(key);
+        this.kv.delete(key);
+      } else {
+        if (!key.startsWith("~")) await this.state.storage.put(key, val);
+        this.kv.set(key, val);
+      }
     }
     const stmtCount = rU16();
     for (let i = 0; i < stmtCount; i++) {
@@ -690,8 +765,11 @@ export class ChannelDO {
         }
       }
       if (this.env.DB) {
+        // console.error, deliberately: a failed deferred write means live play
+        // is no longer persisting (e.g. a daily limit hit) — it must be visible
+        // to log alerts, not buried in info noise. Gameplay itself carries on.
         try { await this.env.DB.prepare(sql).bind(...params).run(); }
-        catch (e) { console.log("channel sql failed:", sql, e); }
+        catch (e) { console.error(`channel sql failed (room ${room}):`, sql, e); }
       } else {
         console.log("channel sql skipped (no DB binding):", sql);
       }
@@ -727,9 +805,11 @@ export class ChannelDO {
 
   // The DO alarm: dispatch a room-level event into the guest (no subject).
   async alarm() {
-    const roomBytes = await this.state.storage.get("__room");
-    const room = roomBytes ? decoder.decode(roomBytes) : "default";
-    await this.dispatchEvent(3, room, "", new Uint8Array(0));
+    if (this.room === null) {
+      const roomBytes = await this.state.storage.get("__room");
+      this.room = roomBytes ? decoder.decode(roomBytes) : "default";
+    }
+    await this.dispatchEvent(3, this.room, "", new Uint8Array(0));
   }
 
   attachmentOf(ws) {

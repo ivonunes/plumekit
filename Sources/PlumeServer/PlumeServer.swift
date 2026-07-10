@@ -198,6 +198,16 @@ public enum PlumeServer {
                 case .text, .binary:
                     var data = frame.unmaskedData
                     let bytes = data.readBytes(length: data.readableBytes) ?? []
+                    // Keepalive: a literal "ping" is answered right here, without
+                    // dispatching the channel (mirrors the Cloudflare adapter's
+                    // hibernation auto-response, where a ping never wakes the DO).
+                    // Clients use it to hold idle sockets open for free.
+                    if bytes == Array("ping".utf8) {
+                        var buffer = ByteBufferAllocator().buffer(capacity: 4)
+                        buffer.writeBytes(Array("pong".utf8))
+                        try await outbound.write(WebSocketFrame(fin: true, opcode: .text, data: buffer))
+                        continue
+                    }
                     await hub.handle(room: room, message: bytes, subject: subject)
                 case .ping:
                     try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))

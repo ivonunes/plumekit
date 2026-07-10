@@ -35,6 +35,10 @@ public actor ChannelHub {
     /// the single-threaded Durable Object). Different rooms still run concurrently.
     private var busyRooms: Set<String> = []
     private var roomWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+    /// In-memory room state, disk-loaded once and write-through after — the disk
+    /// file is only for restart persistence, never a per-event read (mirroring the
+    /// DO adapter's isolate cache). Volatile "~" keys live ONLY here.
+    private var rooms: [String: [(key: String, value: [UInt8])]] = [:]
 
     /// Legacy init: a message-only handler; open/close events are dropped.
     public init(
@@ -108,13 +112,20 @@ public actor ChannelHub {
 
     private func dispatch(room: String, event: ChannelEvent) async {
         await acquireRoom(room)
-        let store = ChannelStore(loadRoom(room))
+        let store = ChannelStore(rooms[room] ?? loadRoom(room))
         let context = ChannelContext(
             store: store, room: room,
             now: Int64(Date().timeIntervalSince1970 * 1000),
             entropy: UInt64.random(in: UInt64.min...UInt64.max))
         try? await handler(event, context)
-        if !store.writes.isEmpty { saveRoom(room, store.snapshot) }
+        if !store.writes.isEmpty {
+            rooms[room] = store.snapshot
+            // Volatile "~" keys never reach disk; skip the file write entirely
+            // when a dispatch touched nothing durable.
+            if store.writes.contains(where: { !$0.key.hasPrefix("~") }) {
+                saveRoom(room, store.snapshot.filter { !$0.key.hasPrefix("~") })
+            }
+        }
         if let database {
             for stmt in context.statements {
                 do { _ = try await database.query(stmt.sql, stmt.params) }

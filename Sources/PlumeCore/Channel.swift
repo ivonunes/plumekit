@@ -17,6 +17,19 @@ public struct ChannelID: Sendable {
 /// A per-channel key/value snapshot the handler reads/writes synchronously. The
 /// adapter pre-loads it from durable storage (DO storage / disk) and persists the
 /// recorded `writes` afterwards — so state survives hibernation/restart.
+///
+/// Two protocol-wide key conventions the adapters enforce:
+/// - **Empty value = delete** (`delete(_:)` is the named spelling): the key
+///   leaves durable storage; no tombstones.
+/// - **Keys starting `~` are volatile**: kept in the adapter's in-memory room
+///   cache only, never billed/persisted, and lost on hibernation or restart.
+///   Use them for respawnable simulation state (wandering monsters, cosmetic
+///   crowds) and hot copies of records that are checkpointed durably elsewhere.
+///
+/// Adapters also answer a literal `"ping"` text frame with `"pong"` WITHOUT
+/// dispatching the channel (Cloudflare: a hibernation auto-response that never
+/// wakes the DO). Clients keep idle sockets alive with those for free; a
+/// handler never sees them.
 public final class ChannelStore: @unchecked Sendable {
     private var entries: [(key: String, value: [UInt8])]
     public private(set) var writes: [(key: String, value: [UInt8])] = []
@@ -30,14 +43,25 @@ public final class ChannelStore: @unchecked Sendable {
         for entry in entries where utf8Equal(entry.key, key) { return entry.value }
         return nil
     }
+    /// Set a value — or DELETE the key by setting an empty value. The effects
+    /// wire has no separate delete op, so "empty = delete" is the protocol-wide
+    /// convention: the key leaves the live snapshot immediately (get → nil,
+    /// list omits it) and adapters erase it from durable storage instead of
+    /// persisting a tombstone that would bloat every later load.
     public func set(_ key: String, _ value: [UInt8]) {
-        var found = false
-        for i in 0..<entries.count where utf8Equal(entries[i].key, key) {
-            entries[i].value = value; found = true; break
+        if value.isEmpty {
+            entries.removeAll { utf8Equal($0.key, key) }
+        } else {
+            var found = false
+            for i in 0..<entries.count where utf8Equal(entries[i].key, key) {
+                entries[i].value = value; found = true; break
+            }
+            if !found { entries.append((key: key, value: value)) }
         }
-        if !found { entries.append((key: key, value: value)) }
         writes.append((key: key, value: value))
     }
+    /// Delete a key (the named spelling of `set(key, [])`).
+    public func delete(_ key: String) { set(key, []) }
     public func list(prefix: String) -> [(key: String, value: [UInt8])] {
         let p = Array(prefix.utf8)
         return entries.filter { channelHasPrefix(Array($0.key.utf8), p) }
