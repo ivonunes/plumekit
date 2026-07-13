@@ -821,13 +821,42 @@ private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: B
         warnIfNoCloudflareAccount(wranglerToml: wranglerToml)
     }
 
-    // 1. Read the target's ledger. A fresh D1 has no schema_migrations table yet, so a
-    //    non-zero exit (or unparseable output) means "nothing applied" — not an error.
-    var ledgerArgs = wranglerArgs + ["d1", "execute", database, scope, "--json",
-                                     "--command", "SELECT version FROM schema_migrations ORDER BY version"]
-    if assumeYes { ledgerArgs.append("--yes") }
-    let ledger = captureStdout(wranglerTool, ledgerArgs, cwd: bundleDir, env: wranglerEnv)
-    let appliedVersions = ledger.status == 0 ? parseLedgerVersions(ledger.output) : []
+    // 1. Read the target's ledger. Fail CLOSED: treating a wrangler crash, auth failure
+    //    or unparseable output as "nothing applied" would replay every migration —
+    //    InitialSchema included — against a live database. The only benign read failure
+    //    is a fresh D1 with no schema_migrations table yet, so that exact case is
+    //    confirmed against sqlite_master before proceeding; anything else aborts.
+    func ledgerQuery(_ sql: String, column: String) -> (status: Int32, rows: [String]?) {
+        var args = wranglerArgs + ["d1", "execute", database, scope, "--json", "--command", sql]
+        if assumeYes { args.append("--yes") }
+        let run = captureStdout(wranglerTool, args, cwd: bundleDir, env: wranglerEnv)
+        guard run.status == 0 else { return (run.status, nil) }
+        return (0, parseD1Column(run.output, column: column))
+    }
+
+    let appliedVersions: [String]
+    let ledger = ledgerQuery("SELECT version FROM schema_migrations ORDER BY version", column: "version")
+    if let versions = ledger.rows {
+        appliedVersions = versions
+    } else if ledger.status == 0 {
+        errorLine("could not parse wrangler's schema_migrations output for \"\(database)\" — aborting rather than treating it as a fresh database")
+        return 1
+    } else {
+        let probe = ledgerQuery(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+            column: "name")
+        guard let tables = probe.rows else {
+            errorLine("reading the schema_migrations ledger of \"\(database)\" failed (wrangler exited \(ledger.status)) — aborting rather than treating it as a fresh database")
+            if remote { wranglerFailureHint() }
+            return ledger.status
+        }
+        guard tables.isEmpty else {
+            errorLine("\"\(database)\" has a schema_migrations table but reading it failed (wrangler exited \(ledger.status)) — aborting rather than treating it as a fresh database")
+            if remote { wranglerFailureHint() }
+            return ledger.status
+        }
+        appliedVersions = []    // confirmed fresh: no ledger table yet
+    }
 
     // 2. Ask the native Server for the pending migrations' SQL (build logs → stderr).
     let compiled = compileTemplates(projectPath: path)
@@ -870,21 +899,24 @@ private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: B
     return status
 }
 
-/// Versions from `wrangler d1 execute --json` for the ledger SELECT. wrangler emits
-/// `[{"results":[{"version":"…"}, …], …}]` (one object per statement); a missing table
-/// or any parse miss → [] (treated as a fresh database by the caller).
-private func parseLedgerVersions(_ json: String) -> [String] {
+/// One column's values from `wrangler d1 execute --json` output. wrangler emits
+/// `[{"results":[{"<column>":"…"}, …], …}]` (one object per statement). Returns nil
+/// when the output isn't that shape at all — the caller must NOT mistake a broken
+/// read for an empty result; a parsed statement with zero rows returns [].
+private func parseD1Column(_ json: String, column: String) -> [String]? {
     guard let data = json.data(using: .utf8),
-          let top = try? JSONSerialization.jsonObject(with: data) else { return [] }
+          let top = try? JSONSerialization.jsonObject(with: data) else { return nil }
     let objects: [Any] = (top as? [Any]) ?? [top]
-    var versions: [String] = []
+    var values: [String] = []
+    var sawResults = false
     for obj in objects {
         guard let dict = obj as? [String: Any], let results = dict["results"] as? [Any] else { continue }
+        sawResults = true
         for row in results {
-            if let rowDict = row as? [String: Any], let v = rowDict["version"] as? String { versions.append(v) }
+            if let rowDict = row as? [String: Any], let v = rowDict[column] as? String { values.append(v) }
         }
     }
-    return versions
+    return sawResults ? values : nil
 }
 
 /// The `-- plumekit-pending: v1,v2` header the Server prints ahead of the pending SQL.

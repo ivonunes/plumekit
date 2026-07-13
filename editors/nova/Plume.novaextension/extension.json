@@ -2,7 +2,7 @@
   "identifier": "uk.ivonunes.plume",
   "name": "Plume",
   "organization": "Ivo Nunes",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Language support for Plume templates.",
   "icon": "Images/extension.png",
   "categories": [
