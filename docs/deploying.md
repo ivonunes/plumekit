@@ -28,7 +28,9 @@ What each target does:
   (D1, module upload, assets, durable-object migrations, cron schedules, queue
   consumers, custom domains) goes over the Cloudflare API — no wrangler or Node.
   Auth comes from `CLOUDFLARE_API_TOKEN`, the token stored by `plumekit login`,
-  or an active `wrangler login` session (reused while valid).
+  or an active `wrangler login` session (reused while valid). `plumekit token`
+  opens the dashboard's create-token page with the needed permissions
+  pre-selected — Workers Scripts/KV/R2/D1/Queues/Routes edit plus Zone read.
 - **aws**: migrate the configured database, build the Lambda bundle, `aws lambda
   update-function-code`. See [Deploying to AWS Lambda](aws.md).
 - **native**: migrate, then `docker build` the container image (push it to your

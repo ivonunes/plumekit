@@ -28,6 +28,7 @@ func printUsage() {
       plumekit deploy [--target …] [--skip-migrations|--seed] [path]  Migrate (+seed) + build + deploy
       plumekit secret set <NAME> [path]         Set a deploy secret for the app's target (hidden prompt/stdin)
       plumekit secret list [path]               List the deploy secrets
+      plumekit token [provider]                 Open the pre-filled deploy-token creation page
       plumekit login [provider]                 Store deploy credentials (default: the app's target)
       plumekit logout [provider]                Forget stored credentials
 
@@ -128,6 +129,9 @@ case "doctor":
 
 case "secret", "secrets":
     exit(secretCommand(arguments: Array(arguments.dropFirst())))
+
+case "token":
+    exit(tokenCommand(arguments: Array(arguments.dropFirst())))
 
 case "login":
     exit(loginCommand(arguments: Array(arguments.dropFirst())))

@@ -33,6 +33,7 @@ Overrides: `PLUMEKIT_BIN=/path/to/plumekit` (use a local build), `PLUMEKIT_VERSI
 | `plumekit build [path]` | Build the target(s) from `[build]` (or `--target cloudflare\|aws\|all`). |
 | `plumekit deploy [path]` | Migrate, (seed,) build and deploy; see [Deploying](deploying.md). |
 | `plumekit secret set <NAME> [path]` | Set a worker secret over the Cloudflare API (value via hidden prompt or stdin). `secret list` lists them. |
+| `plumekit token` | Open the dashboard's create-token page pre-filled with the permissions deploys need. |
 | `plumekit login` | Store a verified Cloudflare API token (and a default account) for deploys. `logout` forgets it. |
 
 The Plume templating commands (`compile`, `check`, `bundle`, `format`,

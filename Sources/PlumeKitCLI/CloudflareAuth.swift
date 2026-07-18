@@ -113,6 +113,59 @@ private func parseISO8601(_ text: String) -> Date? {
     return fractional.date(from: text)
 }
 
+// MARK: - token creation
+
+/// The dashboard's create-token page, pre-filled with exactly the permissions
+/// plumekit deploys need (the "Edit Cloudflare Workers" template lacks D1 and
+/// more). The page shows the selection before creating, so nothing is hidden.
+func cloudflareTokenURL(name: String) -> String {
+    let groups = [
+        ("workers_scripts", "edit"),      // module upload, settings, secrets
+        ("workers_kv_storage", "edit"),   // KV namespaces (+ provisioning)
+        ("workers_r2", "edit"),           // R2 buckets (+ provisioning)
+        ("d1", "edit"),                   // migrations over the D1 API
+        ("queues", "edit"),               // queue + consumer provisioning
+        ("workers_routes", "edit"),       // custom-domain routes
+        ("zone", "read"),                 // zone lookup for custom domains
+    ]
+    let keys = "[" + groups.map { "{\"key\":\"\($0.0)\",\"type\":\"\($0.1)\"}" }
+        .joined(separator: ",") + "]"
+    var components = URLComponents(string: "https://dash.cloudflare.com/profile/api-tokens")!
+    components.queryItems = [
+        URLQueryItem(name: "permissionGroupKeys", value: keys),
+        URLQueryItem(name: "name", value: name),
+    ]
+    return components.url!.absoluteString
+}
+
+/// `plumekit token [provider]` — the easiest way to mint deploy credentials:
+/// prints (and opens, when interactive) the pre-filled token page, then says
+/// where the token goes for CI.
+func tokenCommand(arguments: [String]) -> Int32 {
+    let provider = arguments.first ?? defaultProvider()
+    guard provider == "cloudflare" else {
+        errorLine("no token flow for target \"\(provider)\" (supported: cloudflare)")
+        return 1
+    }
+    let app = CloudflareSettings.read(projectPath: ".", projectName: "plumekit").name
+    let url = cloudflareTokenURL(name: "\(app) deploys")
+    print("Create the deploy token here (permissions pre-selected — scope it to the")
+    print("account, review, and create):")
+    print("")
+    print("  \(url)")
+    print("")
+    print("Then either store it for local deploys:   plumekit login")
+    print("or add it to CI:                          gh secret set CLOUDFLARE_API_TOKEN")
+    if isatty(STDOUT_FILENO) != 0 {
+        #if os(macOS)
+        _ = capture("open", [url])
+        #else
+        _ = capture("xdg-open", [url])
+        #endif
+    }
+    return 0
+}
+
 // MARK: - login / logout
 
 // plumekit is target-generic: `login [provider]` defaults to the app's default
@@ -153,8 +206,8 @@ func logoutCommand(arguments: [String]) -> Int32 {
 }
 
 private func cloudflareLogin() -> Int32 {
-    print("Create an API token at https://dash.cloudflare.com/profile/api-tokens")
-    print("(the \"Edit Cloudflare Workers\" template covers deploys; add Zone Read for custom domains).")
+    print("Create an API token with the pre-filled permissions plumekit needs:")
+    print("  \(cloudflareTokenURL(name: "plumekit deploys"))")
     guard let token = readSecretValue(prompt: "API token (hidden): "),
           !token.trimmingCharacters(in: .whitespaces).isEmpty else {
         errorLine("no token given")

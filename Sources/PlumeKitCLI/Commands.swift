@@ -306,7 +306,7 @@ func buildCloudflareCommand(path: String, outDir: String = "dist", showNextSteps
     print("✓ Cloudflare Worker bundle → \(bundleDir)")
     print("  worker.mjs    module-worker entry (JSPI host bindings, dependency-free)")
     print("  app.wasm      \(rawSize) → \(optSize) bytes  (wasm-opt, −\(savedPct)%)")
-    print("  wrangler.toml name = \"\(name)\"")
+    print("  wrangler.toml name = \"\(settings.name)\"")
     if copiedAssets > 0 {
         print("  public/       \(copiedAssets) static files (served by Cloudflare [assets])")
     }
@@ -967,13 +967,13 @@ private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: B
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
             column: "name")
         guard let tables = probe.rows else {
-            errorLine("reading the schema_migrations ledger of \"\(database)\" failed (wrangler exited \(ledger.status)) — aborting rather than treating it as a fresh database")
-            if remote { wranglerFailureHint() }
+            errorLine("reading the schema_migrations ledger of \"\(database)\" failed — aborting rather than treating it as a fresh database")
+            if remote && apiTransport == nil { wranglerFailureHint() }
             return ledger.status
         }
         guard tables.isEmpty else {
-            errorLine("\"\(database)\" has a schema_migrations table but reading it failed (wrangler exited \(ledger.status)) — aborting rather than treating it as a fresh database")
-            if remote { wranglerFailureHint() }
+            errorLine("\"\(database)\" has a schema_migrations table but reading it failed — aborting rather than treating it as a fresh database")
+            if remote && apiTransport == nil { wranglerFailureHint() }
             return ledger.status
         }
         appliedVersions = []    // confirmed fresh: no ledger table yet
