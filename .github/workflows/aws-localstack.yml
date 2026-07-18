@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Runs on the host (not a container) because the script needs the host's docker to
       # boot LocalStack + Postgres, so Swift is installed from the official toolchain
