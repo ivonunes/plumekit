@@ -20,7 +20,7 @@ jobs:
       image: swift:6.3
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Cache SwiftPM build
         uses: actions/cache@v5
@@ -42,7 +42,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # The runner's default Xcode Swift is older than the package's tools-version.
       - name: Install Swift 6.3.2
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Smoke test installer
         run: |
@@ -96,7 +96,7 @@ jobs:
             arch: arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Check tag matches PlumeKit version
         run: |
@@ -152,7 +152,7 @@ jobs:
             arch: x86_64
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Check tag matches PlumeKit version
         run: |
@@ -203,7 +203,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
