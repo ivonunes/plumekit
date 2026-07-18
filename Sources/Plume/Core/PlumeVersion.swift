@@ -1,3 +1,3 @@
 public enum PlumeVersion {
-    public static let current = "2.0.2"
+    public static let current = "2.1.0"
 }

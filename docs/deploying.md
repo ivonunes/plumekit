@@ -24,31 +24,44 @@ plumekit deploy --skip-seed           # don't seed
 
 What each target does:
 
-- **cloudflare**: migrate the remote D1, build the Worker, `wrangler deploy`.
+- **cloudflare**: migrate the remote D1, build the Worker, deploy. Everything
+  (D1, module upload, assets, durable-object migrations, cron schedules, queue
+  consumers, custom domains) goes over the Cloudflare API — no wrangler or Node.
+  Auth comes from `CLOUDFLARE_API_TOKEN`, the token stored by `plumekit login`,
+  or an active `wrangler login` session (reused while valid).
 - **aws**: migrate the configured database, build the Lambda bundle, `aws lambda
   update-function-code`. See [Deploying to AWS Lambda](aws.md).
 - **native**: migrate, then `docker build` the container image (push it to your
   registry / platform yourself).
 
-## Cloudflare & `wrangler.toml`
+## Cloudflare configuration
 
-`plumekit build --target cloudflare` emits a deployable bundle in `dist/cloudflare/`
-(the `app.wasm` module, a dependency-free `worker.mjs` and `wrangler.toml`). It also
-copies your `Public/` directory to `dist/cloudflare/public`, and the generated
-`wrangler.toml` carries an `[assets]` block (`directory = "./public"`) so Cloudflare
-serves a matching path (`/app.<hash>.css`, `/app.<hash>.js`, your images) directly;
-every other request runs the Worker. See [Static files](#static-files-public).
+Everything Cloudflare-specific lives in plumekit.toml's `[targets.cloudflare]`:
+the account, compatibility date/flags, custom `domains`, `crons`, `[vars]` (as
+`[targets.cloudflare.vars]`), resource-name overrides (`database_name`,
+`queue_name`, `bucket_name`) and the pinned resource ids. `plumekit build
+--target cloudflare` emits a deployable bundle in `dist/cloudflare/` — the
+`app.wasm` module, a dependency-free `worker.mjs`, your `Public/` directory as
+`./public` (served by the `[assets]` block; see
+[Static files](#static-files-public)) and a **generated** `wrangler.toml`, so
+`wrangler dev`/`wrangler tail` and a manual `npx wrangler deploy` keep working
+against the bundle. Settings plumekit doesn't model go in a root
+`wrangler.extra.toml`, appended to the generated file verbatim. (Projects with a
+user-owned root `wrangler.toml` from earlier versions are migrated automatically:
+its values are absorbed into plumekit.toml and the file is renamed to
+`wrangler.toml.bak`.)
 
-Your `wrangler.toml` is **yours to own**. The first build writes one at the project
-root from a template; after that, build reuses your copy, so custom domains,
-logging/observability, `[vars]`, compatibility flags and extra bindings you add are
-never overwritten. Commit it. (Only `worker.mjs`, the JSPI glue, is regenerated each
-build.)
+The first deploy **provisions what the manifest declares**: the D1 database, KV
+namespaces, R2 bucket and queue are looked up by name and created when missing,
+and fresh ids are pinned back into plumekit.toml. Ids are a pin, not a
+requirement: in CI the writeback is discarded and resolution by name keeps
+working, so nothing needs to commit from CI. Existing resources are adopted,
+never recreated; nothing is ever deleted or renamed. Secrets are the one manual
+step: `plumekit secret set NAME` after the first deploy.
 
 ```sh
 plumekit build --target cloudflare
-# customise ./wrangler.toml (bindings, routes, domains, logging …), then:
-cd dist/cloudflare && npx wrangler deploy    # or `plumekit deploy`
+plumekit deploy    # or `cd dist/cloudflare && npx wrangler deploy`
 ```
 
 ## Static files (`Public/`)

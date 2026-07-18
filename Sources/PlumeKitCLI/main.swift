@@ -26,6 +26,10 @@ func printUsage() {
       plumekit build [--target cloudflare|aws|all] [path]  Build the target(s) from
                                                 plumekit.toml's [build] (or --target)
       plumekit deploy [--target …] [--skip-migrations|--seed] [path]  Migrate (+seed) + build + deploy
+      plumekit secret set <NAME> [path]         Set a deploy secret for the app's target (hidden prompt/stdin)
+      plumekit secret list [path]               List the deploy secrets
+      plumekit login [provider]                 Store deploy credentials (default: the app's target)
+      plumekit logout [provider]                Forget stored credentials
 
     Templates (Plume):
     \(PlumeTemplateCommands.helpLines)
@@ -121,6 +125,15 @@ case "dev":
 
 case "doctor":
     exit(doctorCommand())
+
+case "secret", "secrets":
+    exit(secretCommand(arguments: Array(arguments.dropFirst())))
+
+case "login":
+    exit(loginCommand(arguments: Array(arguments.dropFirst())))
+
+case "logout":
+    exit(logoutCommand(arguments: Array(arguments.dropFirst())))
 
 case "routes":
     var path = "."

@@ -30,9 +30,9 @@ jobs:
           restore-keys: |
             linux-test-swiftpm-
 
-      # C system libs the swift image lacks: libsqlite3 (SQLite driver) + libpq (Postgres driver).
+      # libpq for the opt-in Postgres driver (SQLite is vendored in ThirdParty/).
       - name: Install build deps
-        run: apt-get update && apt-get install -y libsqlite3-dev libpq-dev
+        run: apt-get update && apt-get install -y libpq-dev
 
       - name: Test
         run: swift test
@@ -107,7 +107,7 @@ jobs:
           fi
 
       - name: Install build deps
-        run: apt-get update && apt-get install -y libsqlite3-dev libpq-dev
+        run: apt-get update && apt-get install -y libpq-dev
 
       - name: Build
         run: swift build -c release --static-swift-stdlib

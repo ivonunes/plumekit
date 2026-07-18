@@ -76,9 +76,10 @@ func capture(_ tool: String, _ args: [String], cwd: String? = nil,
     return (process.terminationStatus, String(decoding: data, as: UTF8.self))
 }
 
-/// Whether `tool` is resolvable on PATH.
+/// Whether `tool` is resolvable on PATH. Resolved through `sh` because `command`
+/// is a shell builtin — macOS ships a /usr/bin/command binary but Linux doesn't.
 func toolExists(_ tool: String) -> Bool {
-    capture("command", ["-v", tool]).status == 0
+    capture("sh", ["-c", "command -v -- \"$0\"", tool]).status == 0
 }
 
 /// The id of the installed Embedded-Swift WebAssembly SDK (e.g.

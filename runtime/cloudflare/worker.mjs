@@ -135,6 +135,50 @@ function getInstance() {
       if (slot?.stash?.length) new Uint8Array(mem()).set(slot.stash, dstPtr);
     },
 
+    // N statements in one exchange via D1's native batch() (atomic). Request:
+    // u16 count + u32-length-prefixed encodeQueryRequest blobs; response: u16
+    // count + u32-length-prefixed per-statement result blobs (host_db_read).
+    // batch() returns name-keyed rows (there is no raw() for batches), so
+    // duplicate column names across a join collapse — batched reads must
+    // alias them, per the SQLDatabase.batch doc.
+    host_db_batch: new WebAssembly.Suspending(async (ctx, reqPtr, reqLen) => {
+      const slot = ctxTable.get(ctx);
+      const db = slot?.env?.DB;
+      if (!db) { slot.stash = null; return -1; }
+      const bytes = new Uint8Array(mem(), reqPtr, reqLen).slice();
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      let o = 0;
+      const count = view.getUint16(o, true); o += 2;
+      const statements = [];
+      for (let i = 0; i < count; i++) {
+        const blobLen = view.getUint32(o, true); o += 4;
+        statements.push(decodeQueryRequest(bytes.subarray(o, o + blobLen)));
+        o += blobLen;
+      }
+      try {
+        const prepared = statements.map(({ sql, params }) =>
+          params.length ? db.prepare(sql).bind(...params) : db.prepare(sql));
+        const results = await db.batch(prepared);
+        const blobs = results.map((out) => encodeQueryResult(out.results || [], out.meta || {}));
+        let total = 2;
+        for (const b of blobs) total += 4 + b.length;
+        const stash = new Uint8Array(total);
+        const dv = new DataView(stash.buffer);
+        dv.setUint16(0, blobs.length, true);
+        let w = 2;
+        for (const b of blobs) {
+          dv.setUint32(w, b.length, true); w += 4;
+          stash.set(b, w); w += b.length;
+        }
+        slot.stash = stash;
+        return slot.stash.length;
+      } catch (e) {
+        console.log("D1 batch error: " + String((e && e.message) || e));
+        slot.stash = null;
+        return -1;
+      }
+    }),
+
     // Object storage via R2 (binding `BLOB`). Like KV with delete.
     host_blob_get: new WebAssembly.Suspending(async (ctx, keyPtr, keyLen) => {
       const slot = ctxTable.get(ctx);

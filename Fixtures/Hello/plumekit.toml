@@ -27,6 +27,10 @@ storage  = "filesystem"  # filesystem | memory | s3
 [targets.cloudflare]
 database = "d1"
 storage  = "r2"
+compatibility_date = "2026-06-01"
+database_name = "app_db"
+bucket_name = "app-blobs"
+queue_name = "app-jobs"
 
 # AWS profile: links the AWS adapter set (S3/SQS/SSM/DynamoDB/SES + RDS Postgres) for
 # the Lambda runtime. Selecting it swaps the target with zero app-code change; config
@@ -37,3 +41,6 @@ storage  = "s3"         # S3
 queue    = "sqs"        # SQS
 secrets  = "ssm"        # SSM Parameter Store
 channel  = "apigateway" # API Gateway WebSockets + DynamoDB
+
+[targets.cloudflare.vars]
+GREETING = "hello-from-vars"

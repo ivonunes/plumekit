@@ -48,12 +48,35 @@ public enum SQLDialectKind: Sendable {
     case postgres   // Postgres (RDS/Aurora) natively
 }
 
+/// One statement of a batch: SQL plus its bound parameters.
+public struct SQLStatement: Sendable {
+    public let sql: String
+    public let parameters: [SQLValue]
+
+    public init(_ sql: String, _ parameters: [SQLValue] = []) {
+        self.sql = sql
+        self.parameters = parameters
+    }
+}
+
 /// The base data binding (portable floor). Refinements add capabilities.
 public protocol DataStore: Sendable {}
 
 /// SQL-capable refinement — what an adapter implements (D1, SQLite, Postgres…).
 public protocol SQLDatabase: DataStore {
     func query(_ sql: String, _ parameters: [SQLValue]) async throws -> QueryResult
+
+    /// Run several statements in one exchange with the backend, returning one
+    /// result per statement, in order. On Cloudflare D1 every `query` is its
+    /// own network round trip from the Worker, so a handler that needs five
+    /// independent reads pays five hops — `batch` sends them as ONE (D1's
+    /// native `batch()`, which also runs them atomically). Adapters without a
+    /// native batch fall back to running the statements sequentially.
+    ///
+    /// D1 caveat: batched READS come back as name-keyed rows, so duplicate
+    /// column names across a join collapse — alias them (`u.id AS uid`), the
+    /// same rule as the ORM's raw-read note.
+    func batch(_ statements: [SQLStatement]) async throws -> [QueryResult]
 }
 
 extension SQLDatabase {
@@ -62,6 +85,16 @@ extension SQLDatabase {
     public func query(_ sql: String) async throws -> QueryResult {
         try await query(sql, [])
     }
+
+    /// Default: sequential, one round trip per statement. Adapters with a
+    /// native batch (D1) override this with a single exchange.
+    public func batch(_ statements: [SQLStatement]) async throws -> [QueryResult] {
+        var out: [QueryResult] = []
+        for statement in statements {
+            out.append(try await query(statement.sql, statement.parameters))
+        }
+        return out
+    }
 }
 
 /// The concrete, Embedded-clean SQL handle carried in `Context`. Built from any
@@ -69,6 +102,7 @@ extension SQLDatabase {
 /// generic), so no existential ever enters the core.
 public struct Database: Sendable {
     public typealias Querier = @Sendable (String, [SQLValue]) async throws -> QueryResult
+    public typealias Batcher = @Sendable ([SQLStatement]) async throws -> [QueryResult]
     /// Runs a transaction body against a transaction-scoped handle. Installed by
     /// adapters with interactive transactions (native SQLite, Postgres); nil where
     /// the backend has none (Cloudflare D1).
@@ -76,6 +110,7 @@ public struct Database: Sendable {
         @Sendable (_ body: @Sendable @escaping (Database) async throws -> Void) async throws -> Void
 
     private let _query: Querier
+    private let _batch: Batcher
     private let _transaction: TransactionRunner?
 
     /// The dialect the backend speaks — the migrator reads this so app code never
@@ -86,21 +121,51 @@ public struct Database: Sendable {
     /// (Embedded-clean) rather than an `any` existential.
     public init(_ adapter: some SQLDatabase, dialect: SQLDialectKind = .sqlite) {
         self._query = { try await adapter.query($0, $1) }
+        self._batch = { try await adapter.batch($0) }
         self._transaction = nil
         self.dialect = dialect
     }
 
     /// Build directly from a closure (used by adapters that bridge via the host).
+    /// Without an explicit `batch`, batches run sequentially — inside one
+    /// transaction where the adapter has them, so batch atomicity matches D1's.
     public init(query: @escaping Querier, dialect: SQLDialectKind = .sqlite,
-                transaction: TransactionRunner? = nil) {
+                transaction: TransactionRunner? = nil, batch: Batcher? = nil) {
         self._query = query
         self._transaction = transaction
+        self._batch = batch ?? { statements in
+            var out: [QueryResult] = []
+            if let transaction {
+                let box = BatchResultsBox()
+                try await transaction { db in
+                    for statement in statements {
+                        box.results.append(try await db.query(statement.sql, statement.parameters))
+                    }
+                }
+                out = box.results
+            } else {
+                for statement in statements {
+                    out.append(try await query(statement.sql, statement.parameters))
+                }
+            }
+            return out
+        }
         self.dialect = dialect
     }
 
     @discardableResult
     public func query(_ sql: String, _ parameters: [SQLValue] = []) async throws -> QueryResult {
         try await _query(sql, parameters)
+    }
+
+    /// Run several statements in one exchange where the backend supports it
+    /// (Cloudflare D1: one network hop for the lot, executed atomically);
+    /// otherwise sequentially, transaction-wrapped when the adapter has one.
+    /// Returns one result per statement, in order. See `SQLDatabase.batch`
+    /// for the D1 duplicate-column caveat on batched reads.
+    public func batch(_ statements: [SQLStatement]) async throws -> [QueryResult] {
+        if statements.isEmpty { return [] }
+        return try await _batch(statements)
     }
 
     /// Run `body` atomically: its writes commit together, and a thrown error rolls
@@ -138,4 +203,9 @@ public struct Database: Sendable {
 /// body exactly once before returning, so the unsynchronized access is safe.
 private final class TransactionResultBox<T>: @unchecked Sendable {
     var value: T?
+}
+
+/// Same idea, for the sequential-batch fallback's results.
+private final class BatchResultsBox: @unchecked Sendable {
+    var results: [QueryResult] = []
 }

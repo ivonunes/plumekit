@@ -118,7 +118,6 @@ struct Codegen {
     /// Ports (and replaces) the former embed-cloudflare-runtime.py; the `enum` body matches.
     static func runtimeEmbedded(runtimeDir: String) -> String {
         let worker = (try? String(contentsOfFile: runtimeDir + "/worker.mjs", encoding: .utf8)) ?? ""
-        let wrangler = (try? String(contentsOfFile: runtimeDir + "/wrangler.toml.template", encoding: .utf8)) ?? ""
         var out = ""
         out += "// Generated at build time by the PlumeEmbed plugin. Do not edit.\n"
         out += "// Source of truth: runtime/cloudflare/.\n"
@@ -127,10 +126,6 @@ struct Codegen {
         out += "    /// The module-worker entry (JSPI host bindings) `plumekit build --target\n"
         out += "    /// cloudflare` writes as worker.mjs.\n"
         out += "    static let workerJS = " + rawLiteral(worker) + "\n"
-        out += "\n"
-        out += "    /// The wrangler.toml template written to a project on its first build\n"
-        out += "    /// (with __NAME__ substituted).\n"
-        out += "    static let wranglerTemplate = " + rawLiteral(wrangler) + "\n"
         out += "}\n"
         return out
     }

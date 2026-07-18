@@ -711,10 +711,14 @@ ambient: the ORM uses the request's database (`Post.all()`), and the rest are a
           tag="v$version"
           tarball="plumekit-$tag-$os-$arch.tar.gz"
           tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+          # curl or wget, whichever the machine has.
+          if command -v curl >/dev/null 2>&1; then fetch() { curl -fsSL "$1" -o "$2"; }
+          elif command -v wget >/dev/null 2>&1; then fetch() { wget -qO "$2" "$1"; }
+          else echo "plumekit: need curl or wget to fetch the CLI" >&2; exit 1; fi
           echo "plumekit: fetching $tag ($os-$arch)…" >&2
-          curl -fsSL "$repo/releases/download/$tag/$tarball" -o "$tmp/$tarball" \
+          fetch "$repo/releases/download/$tag/$tarball" "$tmp/$tarball" \
             || { echo "plumekit: download failed ($repo/releases/download/$tag/$tarball)" >&2; exit 1; }
-          if curl -fsSL "$repo/releases/download/$tag/plumekit-$tag-SHA256SUMS" -o "$tmp/SUMS" 2>/dev/null; then
+          if fetch "$repo/releases/download/$tag/plumekit-$tag-SHA256SUMS" "$tmp/SUMS" 2>/dev/null; then
             line="$(grep " $tarball$" "$tmp/SUMS" || true)"
             if [ -n "$line" ]; then
               ok=1
@@ -924,6 +928,15 @@ import PlumeTesting
         [targets.cloudflare]
         database = "d1"
         storage  = "r2"
+        # Everything Cloudflare-specific lives here; wrangler.toml is generated from it
+        # into the bundle. Resources are provisioned on first deploy (names default to
+        # the app name; fresh ids are pinned back here). Common extras:
+        # account_id = "…"            # pin the account (or CLOUDFLARE_ACCOUNT_ID / `plumekit login`)
+        # domains = ["app.example.com"]   # custom domains, attached on deploy
+        # crons = ["* * * * *"]       # scheduled tasks (drives registerSchedules())
+        # database_name = "…"         # override the derived resource names
+        # queue_name = "…"
+        # bucket_name = "…"
 
         # AWS Lambda adapters. Set AWS_ENDPOINT_URL (e.g. http://localhost:4566) to point
         # every service at LocalStack for local testing. See docs/aws.md.

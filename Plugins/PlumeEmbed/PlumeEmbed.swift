@@ -30,7 +30,7 @@ struct PlumeEmbed: BuildToolPlugin {
         }
 
         let runtimeDir = root.appending(path: "runtime/cloudflare")
-        let runtimeInputs = ["worker.mjs", "wrangler.toml.template"].map { runtimeDir.appending(path: $0) }
+        let runtimeInputs = ["worker.mjs"].map { runtimeDir.appending(path: $0) }
 
         return [
             .buildCommand(

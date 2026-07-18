@@ -34,11 +34,12 @@ matching CLI release automatically. Once you have a project, you and your CI onl
 ever run `./plumekit …`; there is no separate install. See the
 [CLI reference](../cli.md) for the full command and config surface.
 
-**Toolchain**: native development needs only a Swift 6 toolchain (6.3.2). Building
-the Cloudflare Worker target additionally needs the
+**Toolchain**: a Swift 6 toolchain (6.3.2) is all you need. SQLite is compiled in,
+and the first Cloudflare build installs the
 [Embedded-Swift WebAssembly SDK](https://www.swift.org/documentation/articles/wasm-getting-started.html)
-(`swift-6.3.2-RELEASE_wasm-embedded`, auto-detected), `binaryen` for `wasm-opt`
-(`brew install binaryen`), and Node + `wrangler`. `plumekit doctor` checks all of it.
+and fetches `wasm-opt` by itself. Deploys talk to the Cloudflare API directly —
+authenticate with `CLOUDFLARE_API_TOKEN`, `plumekit login`, or an active
+`wrangler login` session. `plumekit doctor` checks all of it.
 
 (Working from a source checkout instead? `git clone
 https://github.com/ivonunes/plumekit.git`, run `swift run plumekit …` and pass

@@ -78,8 +78,10 @@ let package = Package(
         // token views read through `@csrf`).
         .target(name: "PlumeCore", dependencies: ["PlumeRuntime"]),
 
-        // System SQLite — the native SQL adapter links libsqlite3.
-        .systemLibrary(name: "CSQLite", path: "Sources/CSQLite"),
+        // Vendored SQLite (public domain, see ThirdParty/CSQLite/README.md) — compiled
+        // in, so the native SQL adapter needs no system libsqlite3/-dev anywhere.
+        .target(name: "CSQLite", path: "ThirdParty/CSQLite",
+                cSettings: [.define("SQLITE_OMIT_LOAD_EXTENSION")]),
 
         // Native HTTP adapter (SwiftNIO) + native binding adapters. Native-only.
         .target(name: "PlumeServer", dependencies: [
@@ -134,7 +136,13 @@ let package = Package(
             // from the SDK's default lib path. It rides on PlumeWorker, which every Worker
             // links, so no app-side Package.swift change is needed; scoped to wasi so the
             // native `serve`/AWS builds (which don't link PlumeWorker anyway) are untouched.
-            linkerSettings: [.linkedLibrary("swiftUnicodeDataTables", .when(platforms: [.wasi]))]
+            // libm: the native Linux link of an app's Worker (built by `swift test`,
+            // which builds every product) has nothing else pulling it in — glibc keeps
+            // math in a separate libm, unlike macOS (libSystem) and wasi-libc.
+            linkerSettings: [
+                .linkedLibrary("swiftUnicodeDataTables", .when(platforms: [.wasi])),
+                .linkedLibrary("m", .when(platforms: [.linux])),
+            ]
         ),
 
         // The single `plumekit` CLI. Orchestrates swift / wasm-opt / wrangler, and

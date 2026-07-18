@@ -10,16 +10,51 @@ enum CITemplates {
         switch provider {
         case "github":
             return [(".github/workflows/test.yml", actionsTest),
-                    (".github/workflows/deploy.yml", actionsDeploy(target: target))]
+                    (".github/workflows/deploy.yml", actionsDeploy(target: target)),
+                    (".github/dependabot.yml", dependabot)]
         case "forgejo":
             return [(".forgejo/workflows/test.yml", actionsTest),
-                    (".forgejo/workflows/deploy.yml", actionsDeploy(target: target))]
+                    (".forgejo/workflows/deploy.yml", actionsDeploy(target: target)),
+                    ("renovate.json", renovate)]
         case "gitlab":
-            return [(".gitlab-ci.yml", gitlab(target: target))]
+            return [(".gitlab-ci.yml", gitlab(target: target)),
+                    ("renovate.json", renovate)]
         default:
             return nil
         }
     }
+
+    // Pinned to a patch release the CLI knows a Wasm SDK for (it auto-installs the
+    // matching SDK on the first Cloudflare build) — a floating `swift:6.3` tag would
+    // drift to a toolchain the CLI can't provision yet.
+    private static let swiftImage = "swift:6.3.2"
+
+    // Weekly dependency PRs for the app's Swift packages and the workflows' actions.
+    // GitHub-only: Dependabot is a GitHub service, not part of the Actions syntax.
+    private static let dependabot = """
+    version: 2
+    updates:
+      - package-ecosystem: swift
+        directory: "/"
+        schedule:
+          interval: weekly
+        open-pull-requests-limit: 10
+      - package-ecosystem: github-actions
+        directory: "/"
+        schedule:
+          interval: weekly
+        open-pull-requests-limit: 10
+    """
+
+    // Dependabot's equivalent on Forgejo and GitLab is Renovate: the repo carries the
+    // config and a Renovate bot on the instance acts on it. `config:recommended`
+    // covers Swift packages and workflow actions/images with its default managers.
+    private static let renovate = """
+    {
+      "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+      "extends": ["config:recommended", "schedule:weekly"]
+    }
+    """
 
     // MARK: GitHub / Forgejo Actions (shared syntax)
 
@@ -32,12 +67,15 @@ enum CITemplates {
       test:
         runs-on: ubuntu-latest
         container:
-          image: swift:6.3
+          image: \(swiftImage)
         steps:
-          - uses: actions/checkout@v6
-          # System libs the swift image lacks: libsqlite3 (the default SQLite driver) and
-          # libpq (the Postgres driver, if used).
-          - run: apt-get update && apt-get install -y libsqlite3-dev libpq-dev
+          - uses: actions/checkout@v7
+          - uses: actions/cache@v6
+            with:
+              path: .build
+              key: swiftpm-test-${{ hashFiles('Package.resolved') }}
+              restore-keys: swiftpm-test-
+          # Using the Postgres driver? apt-get install -y libpq-dev first.
           - run: swift test
     """
 
@@ -51,9 +89,14 @@ enum CITemplates {
           deploy:
             runs-on: ubuntu-latest
             container:
-              image: swift:6.3
+              image: \(swiftImage)
             steps:
-              - uses: actions/checkout@v6
+              - uses: actions/checkout@v7
+              - uses: actions/cache@v6
+                with:
+                  path: .build
+                  key: swiftpm-deploy-${{ hashFiles('Package.resolved') }}
+                  restore-keys: swiftpm-deploy-
         \(indentedSetup(target: target, indent: "      "))
               # `plumekit deploy` migrates, builds, and deploys the \(target) target.
               - run: ./plumekit deploy --target \(target)
@@ -70,17 +113,28 @@ enum CITemplates {
 
         test:
           stage: test
-          image: swift:6.3
+          image: \(swiftImage)
           rules:
             - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+          cache:
+            key:
+              files: [Package.resolved]
+              prefix: swiftpm-test
+            paths: [.build]
+          # Using the Postgres driver? apt-get install -y libpq-dev first.
           script:
             - swift test
 
         deploy:
           stage: deploy
-          image: swift:6.3
+          image: \(swiftImage)
           rules:
             - if: $CI_COMMIT_BRANCH == "main"
+          cache:
+            key:
+              files: [Package.resolved]
+              prefix: swiftpm-deploy
+            paths: [.build]
           # Set the secrets below as masked CI/CD variables in your GitLab project.
           script:
         \(gitlabDeployScript(target: target))
@@ -93,16 +147,16 @@ enum CITemplates {
         let lines: [String]
         switch target {
         case "cloudflare":
+            // curl: the ./plumekit wrapper fetches the CLI release with it, and the
+            // swift image doesn't ship it. The CLI provisions everything else (the
+            // Wasm SDK, wasm-opt) and deploys over the Cloudflare API directly.
             lines = [
-                "- name: Install the Embedded WebAssembly SDK",
-                "  run: swift sdk install https://download.swift.org/swift-6.3.2-release/wasm-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_wasm.artifactbundle.tar.gz --checksum a61f0584c93283589f8b2f42db05c1f9a182b506c2957271402992655591dd7c",
-                "- run: apt-get update && apt-get install -y binaryen",
-                "- uses: actions/setup-node@v6",
+                "- run: apt-get update && apt-get install -y curl ca-certificates",
             ]
         case "aws":
-            lines = ["- run: apt-get update && apt-get install -y libpq-dev awscli"]
+            lines = ["- run: apt-get update && apt-get install -y curl ca-certificates libpq-dev awscli"]
         default:  // native — docker is preinstalled on ubuntu runners
-            lines = []
+            lines = ["- run: apt-get update && apt-get install -y curl ca-certificates"]
         }
         return lines.map { indent + $0 }.joined(separator: "\n")
     }
@@ -130,15 +184,15 @@ enum CITemplates {
         switch target {
         case "cloudflare":
             lines = [
-                "- swift sdk install https://download.swift.org/swift-6.3.2-release/wasm-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_wasm.artifactbundle.tar.gz --checksum a61f0584c93283589f8b2f42db05c1f9a182b506c2957271402992655591dd7c",
-                "- apt-get update && apt-get install -y binaryen nodejs npm",
+                "- apt-get update && apt-get install -y curl ca-certificates",
                 "- ./plumekit deploy --target cloudflare",
             ]
         case "aws":
-            lines = ["- apt-get update && apt-get install -y libpq-dev awscli",
+            lines = ["- apt-get update && apt-get install -y curl ca-certificates libpq-dev awscli",
                      "- ./plumekit deploy --target aws"]
         default:
-            lines = ["- ./plumekit deploy --target native"]
+            lines = ["- apt-get update && apt-get install -y curl ca-certificates",
+                     "- ./plumekit deploy --target native"]
         }
         return lines.map { "    " + $0 }.joined(separator: "\n")
     }
