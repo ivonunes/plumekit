@@ -442,10 +442,24 @@ function bootPlumeRuntime() {
         document.head.appendChild(document.importNode(node, true));
       });
     }
-    ["link[rel='canonical']", "meta[name='description']"].forEach(function(selector) {
-      let current = document.head.querySelector(selector);
-      let next = nextDocument.head.querySelector(selector);
-      if (current && next) current.replaceWith(document.importNode(next, true));
+    let canonical = document.head.querySelector("link[rel='canonical']");
+    let nextCanonical = nextDocument.head.querySelector("link[rel='canonical']");
+    if (canonical && nextCanonical) canonical.replaceWith(document.importNode(nextCanonical, true));
+    // Named metas travel with the page (the csrf token, page state that scripts
+    // read): replace by name, add new ones, and drop the ones the incoming page
+    // lacks — otherwise a client-side navigation leaves the previous page's
+    // head state behind and scripts read stale or missing values.
+    let nextMetas = Array.from(nextDocument.head.querySelectorAll("meta[name]"));
+    let nextNames = new Set(nextMetas.map(function(node) { return node.getAttribute("name"); }));
+    let currentMetas = Array.from(document.head.querySelectorAll("meta[name]"));
+    let currentByName = new Map(currentMetas.map(function(node) { return [node.getAttribute("name"), node]; }));
+    nextMetas.forEach(function(node) {
+      let current = currentByName.get(node.getAttribute("name"));
+      if (current) current.replaceWith(document.importNode(node, true));
+      else document.head.appendChild(document.importNode(node, true));
+    });
+    currentMetas.forEach(function(node) {
+      if (!nextNames.has(node.getAttribute("name"))) node.remove();
     });
   };
 

@@ -54,6 +54,7 @@ async function run() {
   await testFrameScopesNavigation();
   await testFormInterceptionAppliesEnvelope();
   await testNoJsFormPathIntact();
+  await testNavigationSwapSyncsHeadMetas();
 
   if (failures === 0) {
     console.log("\nclient runtime: all checks passed");
@@ -62,6 +63,33 @@ async function run() {
     console.error("\nclient runtime: " + failures + " check(s) failed");
     process.exit(1);
   }
+}
+
+// --- navigation: head metas travel with the page ---------------------------
+// Scripts read page state (csrf token, channel tokens) from named head metas;
+// a client-side swap must replace/add/remove them or pages read stale values.
+async function testNavigationSwapSyncsHeadMetas() {
+  console.log("navigation: full-page swap syncs named head metas");
+  const { window, document } = setup('<main id="content">old</main>', {});
+  document.head.innerHTML =
+    "<title>Old</title>" +
+    '<meta name="csrf-token" content="old-csrf">' +
+    '<meta name="stale-only" content="gone-after-swap">' +
+    '<meta name="viewport" content="width=device-width">';
+  const nextHTML = "<!DOCTYPE html><html><head><title>New</title>" +
+    '<meta name="csrf-token" content="new-csrf">' +
+    '<meta name="channel-token-trip" content="fresh-token">' +
+    '<meta name="viewport" content="width=device-width">' +
+    '</head><body><main id="content">new</main></body></html>';
+  const nextDocument = new window.DOMParser().parseFromString(nextHTML, "text/html");
+  window.Plume.swapDocument(new window.URL("https://example.test/trips/1"), nextDocument);
+  await tick();
+  const meta = (name) => document.head.querySelector('meta[name="' + name + '"]');
+  check("replaces same-name metas", meta("csrf-token") && meta("csrf-token").content === "new-csrf");
+  check("adds metas the next page carries", meta("channel-token-trip") && meta("channel-token-trip").content === "fresh-token");
+  check("drops metas the next page lacks", !meta("stale-only"));
+  check("keeps shared metas", meta("viewport") && meta("viewport").content === "width=device-width");
+  check("swaps the body", document.querySelector("#content").textContent === "new");
 }
 
 // --- apply: every action mutates the right target -------------------------
