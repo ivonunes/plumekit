@@ -62,7 +62,7 @@ let package = Package(
         // SwiftNIO — the native reference HTTP transport for PlumeServer.
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         // swift-crypto — SHA256/HMAC for the S3/AWS drivers' SigV4 signing.
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "4.5.1"),
         // swift-syntax — powers the @Model macro (host compiler plugin only; its
         // OUTPUT is plain Embedded-clean Swift). 603.x matches Swift 6.3.
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0"),
