@@ -20,10 +20,17 @@ public struct Response: Sendable {
 
     // MARK: Convenience constructors
 
+    /// The freshness default for dynamic responses. Without an explicit
+    /// Cache-Control, browsers cache heuristically and serve stale pages after
+    /// deploys (a cached page references content-hashed assets that no longer
+    /// exist). Override per response with `headers.set("cache-control", …)`.
+    static let defaultCacheControl = "private, max-age=0, must-revalidate"
+
     /// A `text/plain; charset=utf-8` response.
     public static func text(_ string: String, status: Int = 200) -> Response {
         var headers = Headers()
         headers.set("content-type", "text/plain; charset=utf-8")
+        headers.set("cache-control", defaultCacheControl)
         return Response(status: status, headers: headers, body: encodeUTF8(string))
     }
 
@@ -31,6 +38,7 @@ public struct Response: Sendable {
     public static func html(_ string: String, status: Int = 200) -> Response {
         var headers = Headers()
         headers.set("content-type", "text/html; charset=utf-8")
+        headers.set("cache-control", defaultCacheControl)
         return Response(status: status, headers: headers, body: encodeUTF8(string))
     }
 
@@ -42,6 +50,7 @@ public struct Response: Sendable {
     public static func html(bytes: [UInt8], status: Int = 200) -> Response {
         var headers = Headers()
         headers.set("content-type", "text/html; charset=utf-8")
+        headers.set("cache-control", defaultCacheControl)
         return Response(status: status, headers: headers, body: bytes)
     }
 
@@ -49,6 +58,7 @@ public struct Response: Sendable {
     public static func json(_ string: String, status: Int = 200) -> Response {
         var headers = Headers()
         headers.set("content-type", "application/json; charset=utf-8")
+        headers.set("cache-control", defaultCacheControl)
         return Response(status: status, headers: headers, body: encodeUTF8(string))
     }
 
@@ -56,6 +66,7 @@ public struct Response: Sendable {
     public static func json(_ value: JSONValue, status: Int = 200) -> Response {
         var headers = Headers()
         headers.set("content-type", "application/json; charset=utf-8")
+        headers.set("cache-control", defaultCacheControl)
         return Response(status: status, headers: headers, body: value.serialize())
     }
 

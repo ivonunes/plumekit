@@ -298,6 +298,15 @@ func buildCloudflareCommand(path: String, outDir: String = "dist", showNextSteps
         let publicDst = bundleDir + "/public"
         try? FileManager.default.removeItem(atPath: publicDst)
         try? FileManager.default.copyItem(atPath: publicSrc, toPath: publicDst)
+        // Content-hashed bundle files cache forever (Workers Assets honours a
+        // `_headers` file). The app's own _headers, if present, wins untouched.
+        if !FileManager.default.fileExists(atPath: publicDst + "/_headers") {
+            _ = writeFile("""
+            /app.*
+              Cache-Control: public, max-age=31536000, immutable
+
+            """, to: publicDst + "/_headers")
+        }
         copiedAssets = ((try? FileManager.default.contentsOfDirectory(atPath: publicDst)) ?? []).count
     }
 

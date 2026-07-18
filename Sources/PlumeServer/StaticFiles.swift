@@ -30,8 +30,20 @@ enum StaticFiles {
 
         var headers = Headers()
         headers.add("content-type", contentType(forExtension: target.pathExtension))
-        headers.add("cache-control", "public, max-age=3600")
+        headers.add("cache-control", cacheControl(forFile: target.lastPathComponent))
         return Response(status: 200, headers: headers, body: [UInt8](data))
+    }
+
+    /// Content-hashed bundle files (`app.<hash>.css` / `app.<hash>.js`) never
+    /// change under the same name, so they cache forever; everything else
+    /// revalidates hourly.
+    private static func cacheControl(forFile name: String) -> String {
+        let parts = name.split(separator: ".")
+        if parts.count == 3, parts[0] == "app",
+           parts[1].count == 16, parts[1].allSatisfy({ $0.isHexDigit }) {
+            return "public, max-age=31536000, immutable"
+        }
+        return "public, max-age=3600"
     }
 
     private static func contentType(forExtension ext: String) -> String {
