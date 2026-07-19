@@ -202,7 +202,18 @@ func serveCommand(path: String, host: String, port: UInt16) -> Int32 {
 
 // MARK: - build
 
-func buildCloudflareCommand(path: String, outDir: String = "dist", showNextSteps: Bool = true) -> Int32 {
+/// Where a Cloudflare bundle lands: `dist/cloudflare` for the base deployment,
+/// `dist/cloudflare-<env>` per environment — parallel bundles must not clobber
+/// each other's generated wrangler.toml (that is what `wrangler dev`/`tail` read).
+func cloudflareBundleDir(path: String, outDir: String, env: String?) -> String {
+    path + "/" + outDir + "/cloudflare" + (env.map { "-\($0)" } ?? "")
+}
+
+func buildCloudflareCommand(path: String, outDir: String = "dist", env: String? = nil,
+                            showNextSteps: Bool = true) -> Int32 {
+    if let env, !validateDeclaredEnvironment(projectPath: path, target: "cloudflare", env: env) {
+        return 1
+    }
     guard let sdk = embeddedWasmSDK() ?? installEmbeddedWasmSDK() else {
         errorLine("no Embedded-Swift WebAssembly SDK is installed, and none is published for this toolchain.")
         errorLine("Install one (see swift.org's 'Getting Started with Swift SDKs for WebAssembly'):")
@@ -239,7 +250,7 @@ func buildCloudflareCommand(path: String, outDir: String = "dist", showNextSteps
     }
     let rawSize = fileSize(wasmIn)
 
-    let bundleDir = path + "/" + outDir + "/cloudflare"
+    let bundleDir = cloudflareBundleDir(path: path, outDir: outDir, env: env)
     try? FileManager.default.createDirectory(atPath: bundleDir, withIntermediateDirectories: true)
     let wasmOut = bundleDir + "/app.wasm"
 
@@ -284,7 +295,7 @@ func buildCloudflareCommand(path: String, outDir: String = "dist", showNextSteps
     // wrangler.toml is a GENERATED artifact: emitted into the bundle from
     // plumekit.toml's [targets.cloudflare] (plus wrangler.extra.toml, verbatim),
     // which keeps `wrangler dev`/`tail` and a manual `wrangler deploy` working.
-    let settings = CloudflareSettings.read(projectPath: path, projectName: name)
+    let settings = CloudflareSettings.read(projectPath: path, projectName: name, env: env)
     let wrangler = generateWranglerToml(
         settings: settings,
         extra: try? String(contentsOfFile: path + "/wrangler.extra.toml", encoding: .utf8))
@@ -442,11 +453,12 @@ func buildNativeCommand(path: String) -> Int32 {
 // MARK: - deploy
 
 /// Deploy one target: run data steps (migrate/seed), build, and ship it.
-func deployCommand(target: String, path: String, outDir: String, migrate: Bool, seed: Bool) -> Int32 {
+func deployCommand(target: String, path: String, outDir: String, migrate: Bool, seed: Bool,
+                   env: String? = nil) -> Int32 {
     switch target {
-    case "cloudflare": return deployCloudflare(path: path, outDir: outDir, migrate: migrate, seed: seed)
-    case "aws":        return deployAWS(path: path, outDir: outDir, migrate: migrate, seed: seed)
-    case "native":     return deployNative(path: path, migrate: migrate, seed: seed)
+    case "cloudflare": return deployCloudflare(path: path, outDir: outDir, migrate: migrate, seed: seed, env: env)
+    case "aws":        return deployAWS(path: path, outDir: outDir, migrate: migrate, seed: seed, env: env)
+    case "native":     return deployNative(path: path, migrate: migrate, seed: seed, env: env)
     default:
         errorLine("unknown deploy target '\(target)'. Supported: cloudflare, aws, native")
         return 1
@@ -455,30 +467,32 @@ func deployCommand(target: String, path: String, outDir: String, migrate: Bool, 
 
 /// Pre-deploy data steps. Cloudflare targets the remote D1; native/AWS use the app's
 /// runMigrations/runSeed against the configured database.
-private func deployDataSteps(path: String, d1: D1Target?, migrate: Bool, seed: Bool) -> Int32 {
+private func deployDataSteps(path: String, d1: D1Target?, migrate: Bool, seed: Bool,
+                             env: String? = nil) -> Int32 {
     let scope = d1 == .remote ? " (remote D1)" : ""
     if migrate {
         print("→ Migrating\(scope)")
-        let status = migrateCommand(path: path, d1: d1, dbName: nil, assumeYes: true)
+        let status = migrateCommand(path: path, d1: d1, dbName: nil, assumeYes: true, env: env)
         if status != 0 { return status }
     }
     if seed {
         print("→ Seeding\(scope)")
-        let status = seedCommand(path: path, d1: d1, dbName: nil, assumeYes: true)
+        let status = seedCommand(path: path, d1: d1, dbName: nil, assumeYes: true, env: env)
         if status != 0 { return status }
     }
     return 0
 }
 
-private func deployCloudflare(path: String, outDir: String, migrate: Bool, seed: Bool) -> Int32 {
+private func deployCloudflare(path: String, outDir: String, migrate: Bool, seed: Bool,
+                              env: String?) -> Int32 {
     // Build first: applying migrations/seeds to a remote D1 goes through the bundle's
     // wrangler.toml, which only exists after the build.
-    let built = buildCloudflareCommand(path: path, outDir: outDir, showNextSteps: false)
+    let built = buildCloudflareCommand(path: path, outDir: outDir, env: env, showNextSteps: false)
     if built != 0 { return built }
-    let data = deployDataSteps(path: path, d1: .remote, migrate: migrate, seed: seed)
+    let data = deployDataSteps(path: path, d1: .remote, migrate: migrate, seed: seed, env: env)
     if data != 0 { return data }
 
-    let bundleDir = path + "/" + outDir + "/cloudflare"
+    let bundleDir = cloudflareBundleDir(path: path, outDir: outDir, env: env)
     guard let config = WranglerConfig.load(bundleDir + "/wrangler.toml") else {
         errorLine("could not read \(bundleDir)/wrangler.toml")
         return 1
@@ -490,7 +504,8 @@ private func deployCloudflare(path: String, outDir: String, migrate: Bool, seed:
         return 1
     }
     warnMissingCloudflareSecrets(bundleDir: bundleDir)
-    return deployCloudflareViaAPI(projectRoot: path, bundleDir: bundleDir, api: api, config: config)
+    return deployCloudflareViaAPI(projectRoot: path, bundleDir: bundleDir, api: api, config: config,
+                                  env: env)
 }
 
 /// Warn before deploying if the signing secrets aren't set on the Cloudflare side —
@@ -509,14 +524,19 @@ private func warnMissingCloudflareSecrets(bundleDir: String) {
 
 // MARK: - Secrets
 
-/// `plumekit secret set NAME [path]` / `plumekit secret list [path]` — the deploy
-/// secrets for the app's target (dispatched per provider; cloudflare implemented).
+/// `plumekit secret set NAME [--env E] [path]` / `plumekit secret list [--env E]
+/// [path]` — the deploy secrets for the app's target (dispatched per provider;
+/// cloudflare implemented). With `--env`, the environment's own worker — every
+/// environment keeps a separate secret store.
 /// The value is read from a hidden prompt (or stdin when piped), never from argv.
 func secretCommand(arguments: [String]) -> Int32 {
-    switch arguments.first {
+    guard let parsed = parseOptions(arguments, command: "secret",
+                                    valueSpellings: ["--env": "env"]) else { return 1 }
+    let env = parsed.values["env"]
+    switch parsed.positionals.first {
     case "list":
-        let path = arguments.dropFirst().first ?? "."
-        guard let (api, script) = secretsTarget(path: path) else { return 1 }
+        let path = parsed.positionals.dropFirst().first ?? "."
+        guard let (api, script) = secretsTarget(path: path, env: env) else { return 1 }
         guard let names = api.listSecrets(script: script) else {
             errorLine("could not list secrets — has \"\(script)\" been deployed yet?")
             return 1
@@ -524,13 +544,13 @@ func secretCommand(arguments: [String]) -> Int32 {
         for name in names.sorted() { print(name) }
         return 0
     case "set":
-        guard arguments.count >= 2 else {
-            errorLine("usage: plumekit secret set NAME [path]")
+        guard parsed.positionals.count >= 2 else {
+            errorLine("usage: plumekit secret set NAME [--env E] [path]")
             return 1
         }
-        let name = arguments[1]
-        let path = arguments.count > 2 ? arguments[2] : "."
-        guard let (api, script) = secretsTarget(path: path) else { return 1 }
+        let name = parsed.positionals[1]
+        let path = parsed.positionals.count > 2 ? parsed.positionals[2] : "."
+        guard let (api, script) = secretsTarget(path: path, env: env) else { return 1 }
         guard let value = readSecretValue(prompt: "Value for \(name) (hidden): "), !value.isEmpty else {
             errorLine("no value given")
             return 1
@@ -543,12 +563,12 @@ func secretCommand(arguments: [String]) -> Int32 {
         print(Style.green("✓") + " \(name) set on \"\(script)\"")
         return 0
     default:
-        errorLine("usage: plumekit secret set NAME [path] | plumekit secret list [path]")
+        errorLine("usage: plumekit secret set NAME [--env E] [path] | plumekit secret list [--env E] [path]")
         return 1
     }
 }
 
-private func secretsTarget(path: String) -> (CloudflareAPI, String)? {
+private func secretsTarget(path: String, env: String?) -> (CloudflareAPI, String)? {
     let provider = defaultProvider(path: path)
     guard provider == "cloudflare" else {
         if provider == "aws" {
@@ -558,7 +578,10 @@ private func secretsTarget(path: String) -> (CloudflareAPI, String)? {
         }
         return nil
     }
-    let settings = CloudflareSettings.read(projectPath: path, projectName: projectName(path))
+    if let env, !validateDeclaredEnvironment(projectPath: path, target: provider, env: env) {
+        return nil
+    }
+    let settings = CloudflareSettings.read(projectPath: path, projectName: projectName(path), env: env)
     guard let api = CloudflareAPI.resolve(accountId: settings.accountId) else {
         errorLine("Cloudflare auth needed: set CLOUDFLARE_API_TOKEN, run `plumekit login`, "
                   + "or `wrangler login` (an active session is reused).")
@@ -586,7 +609,11 @@ func readSecretValue(prompt: String) -> String? {
     return readLine()
 }
 
-private func deployAWS(path: String, outDir: String, migrate: Bool, seed: Bool) -> Int32 {
+private func deployAWS(path: String, outDir: String, migrate: Bool, seed: Bool,
+                       env: String?) -> Int32 {
+    if let env, !validateDeclaredEnvironment(projectPath: path, target: "aws", env: env) {
+        return 1
+    }
     // Data steps run through the app's runMigrations/runSeed against the configured
     // database (point [targets.native] at postgres + DATABASE_URL to target RDS).
     let data = deployDataSteps(path: path, d1: nil, migrate: migrate, seed: seed)
@@ -598,21 +625,28 @@ private func deployAWS(path: String, outDir: String, migrate: Bool, seed: Bool) 
         errorLine("the aws CLI is not installed — needed to update the Lambda function code.")
         return 1
     }
-    let function = ProcessInfo.processInfo.environment["AWS_FUNCTION_NAME"] ?? projectName(path)
+    // An environment deploys the same bundle to its own function, "<name>-<env>".
+    // An explicit AWS_FUNCTION_NAME wins verbatim — it names the exact function.
+    // The function's config (env vars, its own database) is the user's, per environment.
+    let function = ProcessInfo.processInfo.environment["AWS_FUNCTION_NAME"]
+        ?? (env.map { "\(projectName(path))-\($0)" } ?? projectName(path))
     let zip = path + "/" + outDir + "/aws/function.zip"
     print("→ Deploying (aws lambda update-function-code → \(function))")
     return runInherit("aws", ["lambda", "update-function-code",
                               "--function-name", function, "--zip-file", "fileb://\(zip)"])
 }
 
-private func deployNative(path: String, migrate: Bool, seed: Bool) -> Int32 {
+private func deployNative(path: String, migrate: Bool, seed: Bool, env: String?) -> Int32 {
+    if let env, !validateDeclaredEnvironment(projectPath: path, target: "native", env: env) {
+        return 1
+    }
     let data = deployDataSteps(path: path, d1: nil, migrate: migrate, seed: seed)
     if data != 0 { return data }
     guard toolExists("docker") else {
         errorLine("docker is not installed — needed to build the container image.")
         return 1
     }
-    let name = projectName(path)
+    let name = env.map { "\(projectName(path))-\($0)" } ?? projectName(path)
     print("→ docker build -t \(name)")
     let status = runInherit("docker", ["build", "-t", name, "."], cwd: path)
     if status != 0 { return status }
@@ -995,10 +1029,15 @@ private func generateCI(arguments: [String]) -> Int32 {
 // database (plumekit.toml); the D1 cases go through wrangler.
 enum D1Target { case local, remote }
 
-func migrateCommand(path: String, d1: D1Target?, dbName: String?, assumeYes: Bool) -> Int32 {
+func migrateCommand(path: String, d1: D1Target?, dbName: String?, assumeYes: Bool,
+                    env: String? = nil) -> Int32 {
     loadDotEnv(projectPath: path)
     if let d1 {
-        return migrateD1(path: path, d1: d1, dbName: dbName, assumeYes: assumeYes)
+        return migrateD1(path: path, d1: d1, dbName: dbName, assumeYes: assumeYes, env: env)
+    }
+    guard env == nil else {
+        errorLine("--env targets a deploy environment's D1 — pass --local or --remote with it.")
+        return 1
     }
     // Native: the app's Server binary applies migrations under --migrate (it holds
     // the migration list).
@@ -1062,10 +1101,16 @@ func migrateStatusCommand(path: String, d1: D1Target?) -> Int32 {
     return runAppServer(path: path, ["--migration-status"])
 }
 
-func seedCommand(path: String, only: String? = nil, d1: D1Target?, dbName: String?, assumeYes: Bool) -> Int32 {
+func seedCommand(path: String, only: String? = nil, d1: D1Target?, dbName: String?, assumeYes: Bool,
+                 env: String? = nil) -> Int32 {
     loadDotEnv(projectPath: path)
     if let d1 {
-        return applyToD1(path: path, verb: "seed", dumpMode: "seed", only: only, d1: d1, dbName: dbName, assumeYes: assumeYes)
+        return applyToD1(path: path, verb: "seed", dumpMode: "seed", only: only, d1: d1, dbName: dbName,
+                         assumeYes: assumeYes, env: env)
+    }
+    guard env == nil else {
+        errorLine("--env targets a deploy environment's D1 — pass --local or --remote with it.")
+        return 1
     }
     print("→ plumekit seed — inserting seed data\(only.map { " (\($0))" } ?? "")")
     var args = ["--seed"]
@@ -1145,11 +1190,16 @@ private func declaredMigrationVersions(projectPath: String) -> [String]? {
 // (the wasm worker can't run migrations), and let wrangler load it. This replaces the
 // old full-schema `CREATE TABLE IF NOT EXISTS` dump, which was additive-only — an
 // ALTER on an existing table never landed.
-private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: Bool) -> Int32 {
-    let bundleDir = path + "/" + BuildConfig.read(projectPath: path).out + "/cloudflare"
+private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: Bool,
+                       env: String? = nil) -> Int32 {
+    if let env, !validateDeclaredEnvironment(projectPath: path, target: "cloudflare", env: env) {
+        return 1
+    }
+    let bundleDir = cloudflareBundleDir(path: path, outDir: BuildConfig.read(projectPath: path).out, env: env)
     let wranglerToml = bundleDir + "/wrangler.toml"
     guard FileManager.default.fileExists(atPath: wranglerToml) else {
-        errorLine("no \(wranglerToml) — run `plumekit build --target cloudflare \(path)` first")
+        let envFlag = env.map { " --env \($0)" } ?? ""
+        errorLine("no \(wranglerToml) — run `plumekit build --target cloudflare\(envFlag) \(path)` first")
         return 1
     }
     let remote = d1 == .remote
@@ -1159,7 +1209,7 @@ private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: B
     // always goes through wrangler — the local D1 lives in its simulator state.
     var apiTransport: (api: CloudflareAPI, databaseId: String)?
     if remote {
-        switch remoteD1Transport(projectPath: path, bundleToml: wranglerToml, dbName: dbName) {
+        switch remoteD1Transport(projectPath: path, bundleToml: wranglerToml, dbName: dbName, env: env) {
         case .api(let api, let databaseId): apiTransport = (api, databaseId)
         case .failed: return 1
         case .none:
@@ -1325,11 +1375,15 @@ private func parsePendingHeader(_ sql: String) -> [String] {
 // dumps it as SQL (it can't run in the wasm worker), and wrangler loads it. One
 // command in place of `Server --dump-sql … > f.sql && wrangler d1 execute … -f f.sql`.
 private func applyToD1(path: String, verb: String, dumpMode: String, only: String? = nil,
-                       d1: D1Target, dbName: String?, assumeYes: Bool) -> Int32 {
-    let bundleDir = path + "/" + BuildConfig.read(projectPath: path).out + "/cloudflare"
+                       d1: D1Target, dbName: String?, assumeYes: Bool, env: String? = nil) -> Int32 {
+    if let env, !validateDeclaredEnvironment(projectPath: path, target: "cloudflare", env: env) {
+        return 1
+    }
+    let bundleDir = cloudflareBundleDir(path: path, outDir: BuildConfig.read(projectPath: path).out, env: env)
     let wranglerToml = bundleDir + "/wrangler.toml"
     guard FileManager.default.fileExists(atPath: wranglerToml) else {
-        errorLine("no \(wranglerToml) — run `plumekit build --target cloudflare \(path)` first")
+        let envFlag = env.map { " --env \($0)" } ?? ""
+        errorLine("no \(wranglerToml) — run `plumekit build --target cloudflare\(envFlag) \(path)` first")
         return 1
     }
     let remote = d1 == .remote
@@ -1338,7 +1392,7 @@ private func applyToD1(path: String, verb: String, dumpMode: String, only: Strin
     // is present, wrangler otherwise; --local always through wrangler's simulator.
     var apiTransport: (api: CloudflareAPI, databaseId: String)?
     if remote {
-        switch remoteD1Transport(projectPath: path, bundleToml: wranglerToml, dbName: dbName) {
+        switch remoteD1Transport(projectPath: path, bundleToml: wranglerToml, dbName: dbName, env: env) {
         case .api(let api, let databaseId): apiTransport = (api, databaseId)
         case .failed: return 1
         case .none:

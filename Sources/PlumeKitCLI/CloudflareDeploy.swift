@@ -7,7 +7,7 @@ import Foundation
 
 /// Deploy the built bundle in `bundleDir`. Returns a process exit status.
 func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: CloudflareAPI,
-                            config initialConfig: WranglerConfig) -> Int32 {
+                            config initialConfig: WranglerConfig, env: String? = nil) -> Int32 {
     guard let script = initialConfig.name, !script.isEmpty else {
         errorLine("wrangler.toml has no `name` — the worker needs one to deploy")
         return 1
@@ -16,7 +16,7 @@ func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: Cloudfl
     // Resolve-or-create the declared resources first; bindings need real ids.
     guard let config = provisionCloudflareResources(
         config: initialConfig, api: api,
-        projectRoot: projectRoot, bundleToml: bundleDir + "/wrangler.toml") else {
+        projectRoot: projectRoot, bundleToml: bundleDir + "/wrangler.toml", env: env) else {
         return 1
     }
 

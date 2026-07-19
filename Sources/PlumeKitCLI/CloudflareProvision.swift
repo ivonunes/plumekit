@@ -10,9 +10,11 @@ import Foundation
 // declared resources, never a delete or rename.
 
 /// Provision everything the config needs for a deploy. Returns the config with
-/// real ids filled in, or nil when something couldn't be resolved.
+/// real ids filled in, or nil when something couldn't be resolved. `env` routes
+/// the manifest writeback into that environment's own section.
 func provisionCloudflareResources(config: WranglerConfig, api: CloudflareAPI,
-                                  projectRoot: String, bundleToml: String) -> WranglerConfig? {
+                                  projectRoot: String, bundleToml: String,
+                                  env: String? = nil) -> WranglerConfig? {
     var config = config
     let worker = config.name ?? "app"
 
@@ -38,8 +40,8 @@ func provisionCloudflareResources(config: WranglerConfig, api: CloudflareAPI,
         }
         config.kvNamespaces[index].id = id
         switch namespace.binding {
-        case "KV": pinManifestValue(projectPath: projectRoot, key: "kv_id", value: id)
-        case "CACHE": pinManifestValue(projectPath: projectRoot, key: "cache_id", value: id)
+        case "KV": pinManifestValue(projectPath: projectRoot, key: "kv_id", value: id, env: env)
+        case "CACHE": pinManifestValue(projectPath: projectRoot, key: "cache_id", value: id, env: env)
         default:
             // Extra namespaces come from wrangler.extra.toml — the user owns that id.
             print("  note: pin id \"\(id)\" for binding \"\(namespace.binding)\" in wrangler.extra.toml")
@@ -53,7 +55,7 @@ func provisionCloudflareResources(config: WranglerConfig, api: CloudflareAPI,
         guard UUID(uuidString: database.databaseId) == nil else { continue }
         guard let id = resolveOrCreateD1(api: api, name: database.databaseName) else { return nil }
         config.d1Databases[index].databaseId = id
-        if index == 0 { pinManifestValue(projectPath: projectRoot, key: "database_id", value: id) }
+        if index == 0 { pinManifestValue(projectPath: projectRoot, key: "database_id", value: id, env: env) }
         pinWranglerValue(section: "d1_databases", matchKey: "database_name", matchValue: database.databaseName,
                          key: "database_id", value: id, in: [bundleToml])
     }
@@ -76,13 +78,13 @@ func provisionCloudflareResources(config: WranglerConfig, api: CloudflareAPI,
 /// resolve by name (creating on first use) and pin it back. Shared by migrate,
 /// seed and deploy so whichever runs first provisions the database.
 func ensureRemoteD1(api: CloudflareAPI, config: WranglerConfig, dbName: String?,
-                    projectRoot: String, bundleToml: String) -> String? {
+                    projectRoot: String, bundleToml: String, env: String? = nil) -> String? {
     let entry = config.d1Databases.first(where: { dbName == nil || $0.databaseName == dbName })
         ?? config.d1Databases.first
     guard let entry, !entry.databaseName.isEmpty else { return nil }
     if UUID(uuidString: entry.databaseId) != nil { return entry.databaseId }
     guard let id = resolveOrCreateD1(api: api, name: entry.databaseName) else { return nil }
-    pinManifestValue(projectPath: projectRoot, key: "database_id", value: id)
+    pinManifestValue(projectPath: projectRoot, key: "database_id", value: id, env: env)
     pinWranglerValue(section: "d1_databases", matchKey: "database_name", matchValue: entry.databaseName,
                      key: "database_id", value: id, in: [bundleToml])
     return id
@@ -97,11 +99,13 @@ enum RemoteD1Transport {
     case api(CloudflareAPI, databaseId: String)
 }
 
-func remoteD1Transport(projectPath: String, bundleToml: String, dbName: String?) -> RemoteD1Transport {
+func remoteD1Transport(projectPath: String, bundleToml: String, dbName: String?,
+                       env: String? = nil) -> RemoteD1Transport {
     guard let config = WranglerConfig.load(bundleToml),
           let api = CloudflareAPI.resolve(config: config) else { return .none }
     guard let id = ensureRemoteD1(api: api, config: config, dbName: dbName,
-                                  projectRoot: projectPath, bundleToml: bundleToml) else { return .failed }
+                                  projectRoot: projectPath, bundleToml: bundleToml,
+                                  env: env) else { return .failed }
     return .api(api, databaseId: id)
 }
 

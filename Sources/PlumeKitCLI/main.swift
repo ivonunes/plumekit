@@ -28,11 +28,11 @@ func printUsage() {
       plumekit test [path] [swift-test flags]   Run the app's test suite (extra flags pass through)
       plumekit doctor                           Check the toolchain for each target
       plumekit mcp                              MCP server (stdio) for AI coding agents
-      plumekit build [--target cloudflare|aws|all] [path]  Build the target(s) from
+      plumekit build [--target cloudflare|aws|all] [--env E] [path]  Build the target(s) from
                                                 plumekit.toml's [build] (or --target)
-      plumekit deploy [--target …] [--skip-migrations|--seed] [path]  Migrate (+seed) + build + deploy
-      plumekit secret set <NAME> [path]         Set a deploy secret for the app's target (hidden prompt/stdin)
-      plumekit secret list [path]               List the deploy secrets
+      plumekit deploy [--target …] [--env E] [--skip-migrations|--seed] [path]  Migrate (+seed) + build + deploy
+      plumekit secret set <NAME> [--env E] [path]  Set a deploy secret for the app's target (hidden prompt/stdin)
+      plumekit secret list [--env E] [path]     List the deploy secrets
       plumekit token [provider]                 Open the pre-filled deploy-token creation page
       plumekit login [provider]                 Store deploy credentials (default: the app's target)
       plumekit logout [provider]                Forget stored credentials
@@ -167,7 +167,7 @@ case "generate", "g":
 case "migrate":
     guard let parsed = parseOptions(
         Array(arguments.dropFirst()), command: "migrate",
-        valueSpellings: ["--db": "db"],
+        valueSpellings: ["--db": "db", "--env": "env"],
         boolSpellings: ["--local": "local", "--remote": "remote", "--yes": "yes", "-y": "yes",
                         "--status": "status", "--rollback": "rollback"]) else { exit(1) }
     let d1: D1Target? = parsed.flags.contains("local") ? .local
@@ -191,12 +191,12 @@ case "migrate":
         exit(migrateRollbackCommand(path: path, steps: rollbackSteps, d1: d1))
     }
     exit(migrateCommand(path: path, d1: d1, dbName: parsed.values["db"],
-                        assumeYes: parsed.flags.contains("yes")))
+                        assumeYes: parsed.flags.contains("yes"), env: parsed.values["env"]))
 
 case "seed":
     guard let parsed = parseOptions(
         Array(arguments.dropFirst()), command: "seed",
-        valueSpellings: ["--db": "db"],
+        valueSpellings: ["--db": "db", "--env": "env"],
         boolSpellings: ["--local": "local", "--remote": "remote", "--yes": "yes", "-y": "yes"]) else { exit(1) }
     let d1: D1Target? = parsed.flags.contains("local") ? .local
         : (parsed.flags.contains("remote") ? .remote : nil)
@@ -211,7 +211,7 @@ case "seed":
         }
     }
     exit(seedCommand(path: path, only: seedOnly, d1: d1, dbName: parsed.values["db"],
-                     assumeYes: parsed.flags.contains("yes")))
+                     assumeYes: parsed.flags.contains("yes"), env: parsed.values["env"]))
 
 case "test":
     // Only the leading positional is ours (the project path); everything else —
@@ -233,8 +233,9 @@ case "test":
 
 case "build":
     guard let parsed = parseOptions(Array(arguments.dropFirst()), command: "build",
-                                    valueSpellings: ["--target": "target"]) else { exit(1) }
+                                    valueSpellings: ["--target": "target", "--env": "env"]) else { exit(1) }
     let path = parsed.positionals.first ?? "."
+    let env = parsed.values["env"]
     // Resolve which target(s) to build. `--target` overrides; otherwise read the
     // `[build]` section of plumekit.toml. `--target all` builds every declared target.
     let config = BuildConfig.read(projectPath: path)
@@ -253,7 +254,7 @@ case "build":
     for buildTarget in requested {
         let status: Int32
         switch buildTarget {
-        case "cloudflare": status = buildCloudflareCommand(path: path, outDir: config.out)
+        case "cloudflare": status = buildCloudflareCommand(path: path, outDir: config.out, env: env)
         case "aws":        status = buildAWSCommand(path: path, outDir: config.out)
         case "native":     status = buildNativeCommand(path: path)
         default:
@@ -266,7 +267,7 @@ case "build":
 case "deploy":
     guard let parsed = parseOptions(
         Array(arguments.dropFirst()), command: "deploy",
-        valueSpellings: ["--target": "target"],
+        valueSpellings: ["--target": "target", "--env": "env"],
         boolSpellings: ["--skip-migrations": "skip-migrations", "--seed": "seed",
                         "--skip-seed": "skip-seed"]) else { exit(1) }
     let path = parsed.positionals.first ?? "."
@@ -290,7 +291,7 @@ case "deploy":
         : (parsed.flags.contains("skip-seed") ? false : deployConfig.deploySeed)
     for deployTarget in deployTargets {
         let status = deployCommand(target: deployTarget, path: path, outDir: deployConfig.out,
-                                   migrate: runMigrate, seed: runSeed)
+                                   migrate: runMigrate, seed: runSeed, env: parsed.values["env"])
         if status != 0 { exit(status) }
     }
     exit(0)

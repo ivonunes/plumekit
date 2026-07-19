@@ -26,10 +26,15 @@ public struct TestApp {
 
     /// Boot a test app. Pass your `buildApp` and `runMigrations`; the harness creates a
     /// fresh in-memory database, applies the migrations, and binds everything into a
-    /// `TestHTTPClient`.
+    /// `TestHTTPClient`. `secrets` adds named secrets/vars the app under test should
+    /// see (the harness's own CSRF secret is always bound). `http` stubs the outbound
+    /// HTTP binding, so handlers that call third parties can be tested hermetically;
+    /// nil leaves the binding unbound, as before.
     public static func boot(
         _ build: () -> Application,
-        migrations: (Database) async throws -> [String] = { _ in [] }
+        migrations: (Database) async throws -> [String] = { _ in [] },
+        secrets extraSecrets: [String: String] = [:],
+        http: (@Sendable (FetchRequest) async throws -> FetchResponse)? = nil
     ) async throws -> TestApp {
         NativeDrivers.installNativeClock()
         let database = try NativeDrivers.sqlite(path: ":memory:")
@@ -40,7 +45,11 @@ public struct TestApp {
             database: database,
             storage: NativeDrivers.memoryStorage(),
             cache: NativeDrivers.memoryCache(),
-            secrets: Secrets(secret: { $0 == "CSRF_SECRET" ? Array(csrfSecret.utf8) : nil }),
+            http: http.map { HTTP(StubHTTPClient(handler: $0)) },
+            secrets: Secrets(secret: { name in
+                if name == "CSRF_SECRET" { return Array(csrfSecret.utf8) }
+                return extraSecrets[name].map { Array($0.utf8) }
+            }),
             log: { _ in }
         )
         let app = build()
@@ -64,6 +73,17 @@ extension TestApp {
                          headers: Headers = Headers()) async -> Response {
         await client.postForm(target, fields: fields + [(CSRF.fieldName, csrfToken)],
                               headers: headers)
+    }
+}
+
+/// The closure-backed outbound-HTTP stub behind TestApp's `http:` parameter.
+private struct StubHTTPClient: HTTPClient {
+    let handler: @Sendable (FetchRequest) async throws -> FetchResponse
+    func get(_ url: String) async throws -> FetchResponse {
+        try await handler(FetchRequest(url: url))
+    }
+    func request(_ request: FetchRequest) async throws -> FetchResponse {
+        try await handler(request)
     }
 }
 

@@ -23,16 +23,16 @@ Overrides: `PLUMEKIT_BIN=/path/to/plumekit` (use a local build), `PLUMEKIT_VERSI
 | `plumekit serve [path]` | Run the app natively. `--host`, `--port`. |
 | `plumekit dev [path]` | Serve, rebuilding on source/template/config changes: the old server keeps running until the new build succeeds, then swaps in — and open browser pages reload themselves on the swap. |
 | `plumekit console [path]` | Interactive REPL against the app + native bindings; type `GET /path`. |
-| `plumekit migrate [path]` | Apply migrations against the native DB. `--local` / `--remote` target a Cloudflare D1 (`--remote` over the Cloudflare API with `CLOUDFLARE_API_TOKEN`, wrangler otherwise). `--rollback [N]` reverses the newest N; `--status` lists each migration as up/down (both native-DB only). |
+| `plumekit migrate [path]` | Apply migrations against the native DB. `--local` / `--remote` target a Cloudflare D1 (`--remote` over the Cloudflare API with `CLOUDFLARE_API_TOKEN`, wrangler otherwise; add `--env <name>` for an environment's D1). `--rollback [N]` reverses the newest N; `--status` lists each migration as up/down (both native-DB only). |
 | `plumekit seed [path]` | Run the app's seeders (same `--local` / `--remote`). |
 | `plumekit routes [path]` | List the app's registered routes. |
 | `plumekit generate <kind> …` | Scaffold a resource, model, controller, migration, view, middleware, job, seeder, test, auth, notifications or CI. Alias: `g`. See [Generators](generators.md). |
 | `plumekit test [path]` | Run the app's test suite. Extra flags pass straight to `swift test` (`plumekit test --filter PostTests`). |
 | `plumekit doctor` | Report the per-target toolchain state (Swift, wasm SDK, wasm-opt, Cloudflare auth, libpq, aws, docker). |
 | `plumekit mcp` | Run an MCP server (stdio) giving AI coding agents accurate PlumeKit APIs; see [MCP for AI agents](mcp.md). |
-| `plumekit build [path]` | Build the target(s) from `[build]` (or `--target cloudflare\|aws\|all`). |
-| `plumekit deploy [path]` | Migrate, (seed,) build and deploy; see [Deploying](deploying.md). |
-| `plumekit secret set <NAME> [path]` | Set a worker secret over the Cloudflare API (value via hidden prompt or stdin). `secret list` lists them. |
+| `plumekit build [path]` | Build the target(s) from `[build]` (or `--target cloudflare\|aws\|all`). `--env <name>` builds for a [deploy environment](deploying.md#deploy-environments). |
+| `plumekit deploy [path]` | Migrate, (seed,) build and deploy; see [Deploying](deploying.md). `--env <name>` deploys an environment. |
+| `plumekit secret set <NAME> [path]` | Set a worker secret over the Cloudflare API (value via hidden prompt or stdin). `secret list` lists them; `--env <name>` targets an environment's worker. |
 | `plumekit token` | Open the dashboard's create-token page pre-filled with the permissions deploys need. |
 | `plumekit login` | Store a verified Cloudflare API token (and a default account) for deploys. `logout` forgets it. |
 

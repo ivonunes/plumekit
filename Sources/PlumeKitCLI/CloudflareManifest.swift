@@ -16,6 +16,46 @@ struct CloudflareNeeds {
     var queue = false
 }
 
+// Deploy environments: `[targets.<target>.env.<name>]` declares a parallel
+// deployment of the same app (a test worker beside production, say). An
+// environment inherits BEHAVIOUR from the base section (account, compatibility
+// date/flags, drivers, crons, batch sizes) but never IDENTITY: the worker name,
+// resource names/ids and domains always resolve within the environment itself,
+// defaulting from "<base-name>-<env>" — inheriting a pinned database id or a
+// custom domain would point the environment at production's resources.
+// `[targets.<target>.env.<name>.vars]` merges over the base vars (env wins),
+// and every environment build injects PLUMEKIT_DEPLOY_ENV = "<name>" so the
+// app can ask which deployment it is running in.
+
+/// The environment names declared for a target in plumekit.toml (any section or
+/// array under `[targets.<target>.env.<name>]`).
+func declaredEnvironments(projectPath: String, target: String) -> [String] {
+    let manifest = parseManifest(projectPath: projectPath)
+    let prefix = "targets.\(target).env."
+    var names: Set<String> = []
+    for key in manifest.sections.keys where key.hasPrefix(prefix) {
+        names.insert(String(key.dropFirst(prefix.count).split(separator: ".")[0]))
+    }
+    for key in manifest.arrays.keys where key.hasPrefix(prefix) {
+        names.insert(String(key.dropFirst(prefix.count).split(separator: "/")[0].split(separator: ".")[0]))
+    }
+    return names.sorted()
+}
+
+/// A typo in `--env` must fail loudly, not silently provision a fresh parallel
+/// stack named after the typo. Prints the declared names on failure.
+func validateDeclaredEnvironment(projectPath: String, target: String, env: String) -> Bool {
+    let declared = declaredEnvironments(projectPath: projectPath, target: target)
+    if declared.contains(env) { return true }
+    if declared.isEmpty {
+        errorLine("no environments are declared for \(target). Add a [targets.\(target).env.\(env)] "
+                  + "section to plumekit.toml first.")
+    } else {
+        errorLine("unknown environment '\(env)' for \(target). Declared: \(declared.joined(separator: ", ")).")
+    }
+    return false
+}
+
 /// Everything [targets.cloudflare] configures, with derived defaults filled in.
 struct CloudflareSettings {
     var needs: CloudflareNeeds
@@ -37,39 +77,64 @@ struct CloudflareSettings {
 
     var snakeName: String { name.replacingOccurrences(of: "-", with: "_") }
 
-    static func read(projectPath: String, projectName: String) -> CloudflareSettings {
+    static func read(projectPath: String, projectName: String, env: String? = nil) -> CloudflareSettings {
         let manifest = parseManifest(projectPath: projectPath)
         let capabilities = manifest.sections["capabilities"] ?? [:]
-        let cloudflare = manifest.sections["targets.cloudflare"] ?? [:]
+        let base = manifest.sections["targets.cloudflare"] ?? [:]
+        let overlay = env.map { manifest.sections["targets.cloudflare.env.\($0)"] ?? [:] }
+
+        // Behaviour inherits (overlay wins per key); identity never leaves the
+        // environment's own section — see the environments note above.
+        func inherited(_ key: String) -> String? { overlay?[key] ?? base[key] }
+        func identity(_ key: String) -> String? { overlay != nil ? overlay?[key] : base[key] }
+        func inheritedArray(_ key: String) -> [String]? {
+            if let env, let values = manifest.arrays["targets.cloudflare.env.\(env)/\(key)"] { return values }
+            return manifest.arrays["targets.cloudflare/\(key)"]
+        }
+        func identityArray(_ key: String) -> [String] {
+            if let env { return manifest.arrays["targets.cloudflare.env.\(env)/\(key)"] ?? [] }
+            return manifest.arrays["targets.cloudflare/\(key)"] ?? []
+        }
+
         func enabled(_ name: String) -> Bool {
             capabilities.isEmpty ? true : capabilities[name] == "true"
         }
         var needs = CloudflareNeeds()
         needs.kv = enabled("kv")
         needs.cache = enabled("cache")
-        needs.d1 = enabled("database") && (cloudflare["database"] ?? "d1") == "d1"
-        needs.r2 = enabled("storage") && (cloudflare["storage"] ?? "r2") == "r2"
+        needs.d1 = enabled("database") && (inherited("database") ?? "d1") == "d1"
+        needs.r2 = enabled("storage") && (inherited("storage") ?? "r2") == "r2"
         needs.queue = enabled("queue")
 
-        let name = cloudflare["name"] ?? projectName
+        let baseName = base["name"] ?? projectName
+        let name = identity("name") ?? (env.map { "\(baseName)-\($0)" } ?? baseName)
         let snake = name.replacingOccurrences(of: "-", with: "_")
+
+        var vars = manifest.sections["targets.cloudflare.vars"] ?? [:]
+        if let env {
+            for (key, value) in manifest.sections["targets.cloudflare.env.\(env).vars"] ?? [:] {
+                vars[key] = value
+            }
+            if vars["PLUMEKIT_DEPLOY_ENV"] == nil { vars["PLUMEKIT_DEPLOY_ENV"] = env }
+        }
+
         return CloudflareSettings(
             needs: needs,
             name: name,
-            accountId: cloudflare["account_id"],
-            compatibilityDate: cloudflare["compatibility_date"] ?? "2026-06-01",
-            compatibilityFlags: manifest.arrays["targets.cloudflare/compatibility_flags"] ?? [],
-            kvId: cloudflare["kv_id"],
-            cacheId: cloudflare["cache_id"],
-            databaseName: cloudflare["database_name"] ?? "\(snake)_db",
-            databaseId: cloudflare["database_id"],
-            bucketName: cloudflare["bucket_name"] ?? "\(name)-blobs",
-            queueName: cloudflare["queue_name"] ?? "\(name)-jobs",
-            queueBatchSize: Int(cloudflare["queue_batch_size"] ?? "") ?? 10,
-            queueBatchTimeout: Int(cloudflare["queue_batch_timeout"] ?? "") ?? 1,
-            crons: manifest.arrays["targets.cloudflare/crons"] ?? [],
-            domains: manifest.arrays["targets.cloudflare/domains"] ?? [],
-            vars: manifest.sections["targets.cloudflare.vars"] ?? [:]
+            accountId: inherited("account_id"),
+            compatibilityDate: inherited("compatibility_date") ?? "2026-06-01",
+            compatibilityFlags: inheritedArray("compatibility_flags") ?? [],
+            kvId: identity("kv_id"),
+            cacheId: identity("cache_id"),
+            databaseName: identity("database_name") ?? "\(snake)_db",
+            databaseId: identity("database_id"),
+            bucketName: identity("bucket_name") ?? "\(name)-blobs",
+            queueName: identity("queue_name") ?? "\(name)-jobs",
+            queueBatchSize: Int(inherited("queue_batch_size") ?? "") ?? 10,
+            queueBatchTimeout: Int(inherited("queue_batch_timeout") ?? "") ?? 1,
+            crons: inheritedArray("crons") ?? [],
+            domains: identityArray("domains"),
+            vars: vars
         )
     }
 }
@@ -379,7 +444,10 @@ func setManifestValues(projectToml: String, section: String, values: [(key: Stri
 }
 
 /// Pin one [targets.cloudflare] value (used by provisioning for fresh ids).
-func pinManifestValue(projectPath: String, key: String, value: String) {
+/// With `env`, the pin lands in that environment's own section — an id resolved
+/// for the test worker must never overwrite production's pin.
+func pinManifestValue(projectPath: String, key: String, value: String, env: String? = nil) {
+    let section = env.map { "targets.cloudflare.env.\($0)" } ?? "targets.cloudflare"
     setManifestValues(projectToml: projectPath + "/plumekit.toml",
-                      section: "targets.cloudflare", values: [(key, "\"\(value)\"")])
+                      section: section, values: [(key, "\"\(value)\"")])
 }
