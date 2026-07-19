@@ -12,3 +12,4 @@ compiler points at with this page open beside it.
 ## Versions
 
 <!-- newest-first: prepare-release.sh inserts each release's line below -->
+- [PlumeKit 3.0.0](3.0.0.md)
