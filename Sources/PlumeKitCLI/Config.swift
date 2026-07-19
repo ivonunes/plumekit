@@ -1,14 +1,28 @@
 import Foundation
 
-// Reads the `[build]` section of a project's plumekit.toml so `plumekit build` knows
-// which target(s) to build without a `--target` flag. (The capability/driver sections
-// are read separately by the PlumeKitCodegen build plugin at compile time.)
+// Reads the `[build]`, `[deploy]` and `[capabilities]` sections of a project's
+// plumekit.toml so `plumekit build` knows which target(s) to build without a
+// `--target` flag, and generators can check what the app has enabled. (The build
+// plugin does its own parse of the capability/driver sections at compile time.)
 struct BuildConfig {
     var defaultTarget: String?   // [build] default = "cloudflare"
     var targets: [String]        // [build] targets = ["cloudflare", "aws"]
     var out: String = "dist"     // [build] out = "dist" — bundle output directory
     var deployMigrate = true     // [deploy] migrate = true  — run migrations on deploy
     var deploySeed = false       // [deploy] seed = false    — run seeders on deploy
+    var declaredCapabilities: [String: Bool] = [:]   // [capabilities] name = true
+
+    /// Whether the app has a capability — same rule as codegen: an absent
+    /// `[capabilities]` table means everything is enabled.
+    func hasCapability(_ name: String) -> Bool {
+        declaredCapabilities.isEmpty ? true : declaredCapabilities[name] == true
+    }
+
+    /// The enabled capability names (empty when the table is absent — check
+    /// `hasCapability` rather than this when "absent means all" matters).
+    var enabledCapabilities: Set<String> {
+        Set(declaredCapabilities.filter { $0.value }.keys)
+    }
 
     static func read(projectPath: String) -> BuildConfig {
         var config = BuildConfig(defaultTarget: nil, targets: [])
@@ -22,11 +36,17 @@ struct BuildConfig {
             if line.hasPrefix("[") && line.hasSuffix("]") {
                 section = String(line.dropFirst().dropLast()); continue
             }
-            guard section == "build" || section == "deploy", let eq = line.firstIndex(of: "=") else { continue }
+            guard section == "build" || section == "deploy" || section == "capabilities",
+                  let eq = line.firstIndex(of: "=") else { continue }
             let key = line[..<eq].trimmingCharacters(in: .whitespaces)
             var valuePart = String(line[line.index(after: eq)...])
             if let hash = valuePart.firstIndex(of: "#") { valuePart = String(valuePart[..<hash]) }
             let value = valuePart.trimmingCharacters(in: .whitespaces)
+
+            if section == "capabilities" {
+                config.declaredCapabilities[key] = (value == "true")
+                continue
+            }
 
             if section == "deploy" {
                 switch key {

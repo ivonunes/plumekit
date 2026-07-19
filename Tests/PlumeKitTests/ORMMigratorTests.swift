@@ -176,3 +176,25 @@ private func contains(_ haystack: String, _ needle: String) -> Bool {
     }
     return false
 }
+
+@Test func failingMigrationRollsBackAtomically() async throws {
+    let db = try NativeDrivers.sqlite(path: ":memory:")
+    // The second statement fails (no such table) AFTER the first created one.
+    let broken = Migration.sql(
+        version: "0001_broken",
+        up: """
+        CREATE TABLE half_applied (id INTEGER PRIMARY KEY);
+        INSERT INTO no_such_table (id) VALUES (1);
+        """)
+    await #expect(throws: (any Error).self) {
+        try await Migrator([broken]).migrate(in: db)
+    }
+    // Atomic: the successful CREATE was rolled back with the failure, and the
+    // ledger has no row — a re-run starts clean instead of tripping over
+    // half-applied DDL.
+    let tables = try await db.query(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'half_applied'", [])
+    #expect(tables.rows.isEmpty)
+    let ledger = try await db.query("SELECT version FROM schema_migrations", [])
+    #expect(ledger.rows.isEmpty)
+}

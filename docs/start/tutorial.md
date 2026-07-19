@@ -43,7 +43,8 @@ bookmarks/
   plumekit.toml              # capabilities + per-target config
   plumekit                   # the CLI wrapper (commit it; it pins the version)
   Sources/App/
-    App.swift                # buildApp(): your routes and middleware
+    App.swift                # buildApp(): app setup + middleware
+    Routes.swift             # registerRoutes(): your routes
     Database/Database.swift  # runMigrations() and runSeed()
   Views/
     Layout.plume             # the shared page shell (a component with a slot)
@@ -192,7 +193,7 @@ import PlumeORM
 struct BookmarksController: Controller {
     // GET /bookmarks: list newest first and show the add form.
     func index(_ request: Request) async throws -> Response {
-        let bookmarks = try await Bookmark.all().order(by: Bookmark.id, .descending).all()
+        let bookmarks = try await Bookmark.query().order(by: Bookmark.id, .descending).all()
         return .view(bookmarksPage(bookmarks: bookmarks))
     }
 
@@ -201,7 +202,7 @@ struct BookmarksController: Controller {
         let title = request.form["title"] ?? ""
         let url = request.form["url"] ?? ""
         if title.isEmpty || url.isEmpty {
-            let bookmarks = try await Bookmark.all().order(by: Bookmark.id, .descending).all()
+            let bookmarks = try await Bookmark.query().order(by: Bookmark.id, .descending).all()
             return .view(bookmarksPage(bookmarks: bookmarks,
                                        error: "Title and URL are both required."))
         }
@@ -293,7 +294,7 @@ You've used the core of PlumeKit. From here:
 
 - **Validation rules**: declare them on the model so `save()` enforces them. See
   [Validations](../validations.md).
-- **Pagination**: `Bookmark.all().paginate(page: 1, per: 20)` returns a `Page` with
+- **Pagination**: `Bookmark.query().paginate(page: 1, per: 20)` returns a `Page` with
   `nextURL`/`previousURL` and totals. See the [ORM](../orm.md).
 - **Auth**: `plumekit generate auth` scaffolds registration, login and sessions. See
   [Auth](../auth.md).

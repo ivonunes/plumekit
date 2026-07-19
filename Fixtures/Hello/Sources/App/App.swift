@@ -21,7 +21,7 @@ public func buildApp() -> Application {
     // form/multipart submissions (JSON APIs are exempt — they use token auth).
     app.use(methodOverride())
     app.use(csrfProtection())
-    app.use(authIdentityMiddleware())   // resolve currentUser from cookie or bearer
+    app.use(identityMiddleware())   // resolve currentUser from cookie or bearer (AUTH_SECRET + KV)
     registerAuthRoutes(app)             // /auth/register, /auth/login, /auth/logout, /auth/me
     registerAPIRoutes(app)              // /api/v1 (token-only, paginated, structured errors)
     registerSyncRoutes(app)             // /api/v1/sync/notes (delta + idempotent intents)
@@ -205,7 +205,7 @@ public func buildApp() -> Application {
         let db = request.bindings.database
         try await Post.createTable(in: db)
         let post = Post(title: "Hello & <World>", views: 7, published: true)
-        try await post.save(in: db)                       // INSERT, populates id
+        _ = try await post.save(in: db)                       // INSERT, populates id
         guard let restored = try await Post.find(post.id, in: db) else {
             return .text("not found after save", status: 500)
         }
@@ -221,7 +221,7 @@ public func buildApp() -> Application {
             .order(by: Post.views, .descending)
             .limit(3)
             .all(in: db)
-        let total = try await Post.all().count(in: db)
+        let total = try await Post.count(in: db)
         return .text("matched=\(hits.count) total=\(total) top=\(hits.first?.title ?? "-")")
     }
 
@@ -232,9 +232,9 @@ public func buildApp() -> Application {
         try await Post.createTable(in: db)
         try await Comment.createTable(in: db)
         let post = Post(title: "T", views: 1, published: true)
-        try await post.save(in: db)
-        try await Comment(body: "a", post: post).save(in: db)
-        try await Comment(body: "b", post: post).save(in: db)
+        _ = try await post.save(in: db)
+        _ = try await Comment(body: "a", post: post).save(in: db)
+        _ = try await Comment(body: "b", post: post).save(in: db)
         let comments = try await post.$comments.load(in: db)
         let parent = try await comments.first?.$post.load(in: db)
         return .text("post=\(post.id) comments=\(comments.count) parent=\(parent?.id ?? -1)")
@@ -246,8 +246,29 @@ public func buildApp() -> Application {
         let db = request.bindings.database
         try await Post.createTable(in: db)
         let post = Post(title: "t", views: 0, published: false)
-        try await post.save(in: db)
+        _ = try await post.save(in: db)
         return .text("createdAt=\(post.createdAt > 0) updatedAt=\(post.updatedAt > 0)")
+    }
+
+    // Streaming bodies — a chunked response and an unbuffered upload. The same
+    // handlers run buffered on Workers/Lambda (the ABI is one blob there).
+    app.get("/stream/count") { _ in
+        .stream(contentType: "text/plain") { writer in
+            for i in 1...5 { try await writer.write("chunk-\(i)\n") }
+        }
+    }
+    app.post("/upload/stream", body: .streaming) { request in
+        var total = 0
+        while let chunk = try await request.bodyReader?.next() { total += chunk.count }
+        return .text("received \(total) bytes")
+    }
+    // …and straight into object storage: chunks flow to the driver's sink
+    // (filesystem/S3 stream; buffered drivers collect) without buffering here.
+    app.post("/upload/store", body: .streaming) { request in
+        guard let reader = request.bodyReader else { return .status(400) }
+        try await request.bindings.storage.put("uploads/streamed.bin", from: reader)
+        let stored = try await request.bindings.storage.get("uploads/streamed.bin")?.count ?? -1
+        return .text("stored \(stored) bytes")
     }
 
     // Migrations run from the CLI (`plumekit migrate`) or the Server's --migrate
@@ -262,8 +283,8 @@ public func buildApp() -> Application {
     }
     #endif
 
-    // Validations — save() validates first and throws ValidationFailed; the
-    // handler maps it to 422. Same on native SQLite and D1.
+    // Validations — save() validates first and returns the errors (persisting
+    // nothing); the handler maps them to 422. Same on native SQLite and D1.
     app.get("/validate") { request in
         let db = request.bindings.database
         try await Post.createTable(in: db)

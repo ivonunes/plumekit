@@ -83,9 +83,13 @@ let package = Package(
         .target(name: "CSQLite", path: "ThirdParty/CSQLite",
                 cSettings: [.define("SQLITE_OMIT_LOAD_EXTENSION")]),
 
+        // Vendored zlib deflate (zlib licence, see ThirdParty/CZlib/README.md) —
+        // gzip response compression with no system zlib/-dev anywhere.
+        .target(name: "CZlib", path: "ThirdParty/CZlib"),
+
         // Native HTTP adapter (SwiftNIO) + native binding adapters. Native-only.
         .target(name: "PlumeServer", dependencies: [
-            "PlumeCore", "PlumeORM", "CSQLite",
+            "PlumeCore", "PlumeORM", "CSQLite", "CZlib",
             .product(name: "NIOCore", package: "swift-nio"),
             .product(name: "NIOPosix", package: "swift-nio"),
             .product(name: "NIOHTTP1", package: "swift-nio"),
@@ -158,7 +162,11 @@ let package = Package(
 
         // Native Swift Testing — the framework suite.
         .testTarget(name: "PlumeKitTests",
-                    dependencies: ["PlumeCore", "PlumeServer", "PlumeWorker", "PlumeORM", "PlumeAWS"]),
+                    dependencies: ["PlumeCore", "PlumeServer", "PlumeWorker", "PlumeORM", "PlumeAWS",
+                                   "PlumePostgres", "PlumeS3",
+                                   // Deterministic channel-handler tests (the body-idle guard).
+                                   .product(name: "NIOEmbedded", package: "swift-nio"),
+                                   .product(name: "NIOHTTP1", package: "swift-nio")]),
 
         // The templating suite.
         .testTarget(name: "PlumeTests", dependencies: ["Plume", "PlumeRuntime"]),

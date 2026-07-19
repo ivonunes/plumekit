@@ -137,7 +137,9 @@ enum MCPServer {
         guard let root = frameworkRoot(),
               let enumerator = FileManager.default.enumerator(atPath: root + "/docs") else { return nil }
         var files: [(name: String, content: String)] = []
-        for case let path as String in enumerator where path.hasSuffix(".md") {
+        // upgrading/next.md stays out: unreleased working notes (matches the embed).
+        for case let path as String in enumerator
+        where path.hasSuffix(".md") && path != "upgrading/next.md" {
             if let content = try? String(contentsOfFile: root + "/docs/" + path, encoding: .utf8) {
                 files.append((path, content))
             }

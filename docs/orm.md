@@ -38,13 +38,20 @@ final class Post: Model {
 
 ```swift
 let post = Post(title: "Hi", views: 5, published: false)
-try await post.save()       // INSERT; populates post.id from lastInsertID
+let errors = try await post.save()   // INSERT; populates post.id from lastInsertID
+guard errors.isEmpty else { … }      // validation failures come back as values
 post.published = true
-try await post.save()       // UPDATE: only the changed columns (dirty tracking)
-try await post.upsert()     // INSERT, or UPDATE if the primary key already exists
+_ = try await post.save()            // UPDATE: only the changed columns (dirty tracking)
+_ = try await post.upsert()          // INSERT, or UPDATE if the primary key already exists
 try await post.delete()
-let one = try await Post.find(42)   // Post?
+let one = try await Post.find(42)    // Post?
 ```
+
+`save()` (and `upsert()`) validates first and **returns** the validation errors,
+persisting nothing when any rule fails; real database errors still throw. The
+result is deliberately not discardable: write `_ =` when the model has no
+validations, check the array when it does. See
+[Validations](validations.md).
 
 `save`/`delete`/`find` are written **once**, generically over `Model` + the
 `Database` protocol. All SQL is built by ASCII append; values are always
@@ -63,7 +70,7 @@ final class AccessToken: Model {
 }
 
 let token = AccessToken(label: "primary")   // id defaults to UUID()
-try await token.save(in: db)                // INSERT includes the UUID key
+_ = try await token.save(in: db)            // INSERT includes the UUID key
 let found = try await AccessToken.find(token.id, in: db)
 ```
 
@@ -80,22 +87,48 @@ model's default scope, so a soft-deleted row is not found.
 
 ## Typed query builder
 
+`Post.query()` starts a builder; `Post.where(...)` starts it filtered. The
+executing terminals are `all()`, `first()`, `count()`, `exists()` and friends,
+so which call hits the database is always visible. `Post.all()` /
+`Post.count()` run directly for the everyday whole-table cases.
+
 ```swift
+let everything = try await Post.all()
 let recent = try await Post
     .where(Post.published == true && Post.views > 100)
     .order(by: Post.views, .descending)
     .limit(10)
     .all()
 let n = try await Post.where(Post.published == false).count()
-let latest = try await Post.order(by: Post.id, .descending).first()   // Post?
-let page3 = try await Post.order(by: Post.id).offset(40).limit(20).all()
+let latest = try await Post.query().order(by: Post.id, .descending).first()   // Post?
+let page3 = try await Post.query().order(by: Post.id).offset(40).limit(20).all()
+
+// Chained `order` calls compose into a multi-column ORDER BY.
+let ranked = try await Post.query().order(by: Post.published).order(by: Post.views, .descending).all()
+
+// Cheap probes and projections — no row decoding:
+let any = try await Post.where(Post.published == true).exists()        // SELECT 1 … LIMIT 1
+let ids = try await Post.where(Post.published == true).pluckInts(Post.id)
+let hits = try await Post.where(Post.id.within(ids)).all()             // typed IN (…)
+
+// Aggregates run in SQL:
+let views = try await Post.query().sum(Post.views)
+let top = try await Post.query().maximum(Post.views)                   // Int? (nil with no rows)
+
+// Bulk writes: one statement, no per-row loads (callbacks don't run):
+try await Post.where(Post.published == false).updateAll(Post.views.set(0))
+try await Post.where(Post.views == 0).delete()
 
 // Pagination: order by a stable column for deterministic pages. The Page gives
 // views everything they need: page.items, page.page, page.previousPage/nextPage,
 // page.previousURL("/posts")/nextURL("/posts"), and (with `withTotal: true`, one
 // extra COUNT) page.total/totalPages. Return it with `.json(page)` for the
 // standard paginated envelope.
-let page = try await Post.all().order(by: Post.id).paginate(page: 2, per: 20, withTotal: true)
+let page = try await Post.query().order(by: Post.id).paginate(page: 2, per: 20, withTotal: true)
+
+// Or straight from the request: reads the `page`/`per` query params (the same
+// names Page.url emits), clamping `per` to `maxPer`.
+let fromRequest = try await Post.query().order(by: Post.id).paginate(request)
 ```
 
 `Column<Root, Value>` and `Predicate<Root>` are **concrete generic value types**.
@@ -140,19 +173,26 @@ belongs-to and injects the owner id into has-many handles via `refreshRelations(
 > the integer FK in the common case, or `$post.key` for the raw `SQLValue` of any key
 > type.
 
+An **unloaded** relation reads as empty (`post.comments` is `[]`, `comment.post`
+is nil) — it never auto-loads. When "not loaded" and "none" must be told apart,
+check `$comments.isLoaded` / `$post.isLoaded`, or just load first.
+
 Eager loading is **batched** (no N+1): for many owners it issues **one** child
-query, then groups and assigns:
+query, then groups and assigns. `@Model` generates a typed helper per has-many,
+so a page preloads an association in one line:
 
 ```swift
-try await eagerLoad(posts, foreignKey: "post_id",
-    childKey: { (c: Comment) in c.$post.id },
-    assign:   { (p: Post, kids: [Comment]) in p.$comments.cached = kids },
-    in: db)
+let posts = try await Post.all()
+try await Post.preloadComments(posts)      // ONE query fills every post's $comments
 ```
 
+The underlying seam is `eagerLoad(_:foreignKey:assign:in:)` for hand-written
+stores; the generated helper supplies the FK name and the assignment, so a typo
+can't reach it.
+
 Keypaths don't compile under embedded Wasm, which shapes two corners of this API:
-- Eager loading uses closures, not `.with(\.$comments)` keypaths (and the
-  enclosing-self wrapper subscript, which needs `ReferenceWritableKeyPath`, is
+- Eager loading uses a closure assignment, not `.with(\.$comments)` keypaths (and
+  the enclosing-self wrapper subscript, which needs `ReferenceWritableKeyPath`, is
   out, hence `refreshRelations()`).
 - `@BelongsTo var author: User?` is optional (nil until loaded), not `User`.
 
@@ -277,5 +317,7 @@ guest handles one request per instance. A transaction, which needs per-task rout
 even within one app, uses a task-local that only exists in the native build; see
 [Transactions](#transactions).)
 
-Outside a request there is no ambient binding, which is why migrations, seeders,
-tests and background jobs pass the handle explicitly with `in: db`.
+Migrations, seeders, background jobs and the console get the same ambient binding
+(the runner binds the context before dispatch), so `in: db` there is optional too.
+Tests are the one place with no ambient database, which is why test code passes
+the handle explicitly: `post.save(in: app.database)`.

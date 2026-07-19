@@ -43,10 +43,16 @@ the App module). `TestApp` exposes `app`, `client`, `database` and `context`.
 
 ```swift
 await app.client.get("/posts")
-await app.client.postForm("/posts", "title=Hello&body=World")
+await app.postForm("/posts", [("title", "Hello"), ("body", "World & more")])
 await app.client.post("/api/posts", json: .object([(name: "title", value: .string("Hi"))]))
 await app.client.get("/me", headers: .bearer(token))          // authenticated request
 ```
+
+`app.postForm` percent-encodes the fields and appends the harness's CSRF token,
+so a controller test is just the fields it cares about. The lower-level
+`app.client.postForm(_:fields:)` encodes without the token, and the raw string
+form (`app.client.postForm("/posts", "a=b")`) is still there for testing
+malformed bodies.
 
 ## Response assertions
 

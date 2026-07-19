@@ -3,7 +3,10 @@ import Foundation
 // The single `plumekit` CLI — the framework commands plus the Plume templating
 // commands (compile/check/bundle/format/language-server), folded into one binary.
 //
-// Deliberately dependency-free: arguments are parsed by hand (no ArgumentParser).
+// Deliberately dependency-free: arguments are parsed by hand (no ArgumentParser),
+// through one strict helper — `--flag value` and `--flag=value` both work, short
+// aliases are declared per command, and an unknown flag is an ERROR, not a silent
+// no-op (muscle-memory typos like `-p 3000` must never quietly serve on 8080).
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 
@@ -17,10 +20,12 @@ func printUsage() {
       plumekit dev [--host H] [--port N] [path] Serve + rebuild/restart on file changes
       plumekit console [path]                   Interactive REPL against the app + native KV
       plumekit migrate [--local|--remote] [path] Apply migrations: native DB, or a Cloudflare D1
+      plumekit migrate --rollback [N] [path]    Reverse the last N migrations (native DB)
+      plumekit migrate --status [path]          List each migration and whether it has run
       plumekit seed [name] [--local|--remote] [path]   Run all seeders (or just <name>): native DB or D1
       plumekit routes [path]                    List the app's registered routes
       plumekit generate <model|controller|ci> … Scaffold code / CI workflows
-      plumekit test [path]                      Run the app's test suite
+      plumekit test [path] [swift-test flags]   Run the app's test suite (extra flags pass through)
       plumekit doctor                           Check the toolchain for each target
       plumekit mcp                              MCP server (stdio) for AI coding agents
       plumekit build [--target cloudflare|aws|all] [path]  Build the target(s) from
@@ -39,26 +44,75 @@ func printUsage() {
     """)
 }
 
-/// Shared parse for `migrate`/`seed`: an optional D1 target (`--local`/`--remote`),
-/// an optional `--db NAME` override, `--yes`, and a positional project path.
-func parseDBTargetArgs(_ arguments: [String]) -> (path: String, d1: D1Target?, dbName: String?, assumeYes: Bool) {
-    var path = "."
-    var d1: D1Target?
-    var dbName: String?
-    var assumeYes = false
-    var index = 1
+/// Parsed command line: `--flag value` / `--flag=value` values, boolean flags
+/// (canonical names), and bare positionals.
+struct ParsedOptions {
+    var values: [String: String] = [:]
+    var flags: Set<String> = []
+    var positionals: [String] = []
+}
+
+/// Strict parse for one command. `valueSpellings`/`boolSpellings` map every
+/// accepted spelling (`--port`, `-p`) to its canonical name (`port`). An unknown
+/// flag or a value flag without a value prints the error and returns nil; the
+/// caller exits 1.
+func parseOptions(
+    _ arguments: [String],
+    command: String,
+    valueSpellings: [String: String] = [:],
+    boolSpellings: [String: String] = [:]
+) -> ParsedOptions? {
+    var parsed = ParsedOptions()
+    var index = 0
     while index < arguments.count {
-        let arg = arguments[index]
-        switch arg {
-        case "--local": d1 = .local
-        case "--remote": d1 = .remote
-        case "--db": if index + 1 < arguments.count { dbName = arguments[index + 1]; index += 1 }
-        case "--yes", "-y": assumeYes = true
-        default: if !arg.hasPrefix("-") { path = arg }
+        let argument = arguments[index]
+        if argument.hasPrefix("-") {
+            var spelling = argument
+            var inlineValue: String?
+            if let equals = argument.firstIndex(of: "=") {
+                spelling = String(argument[..<equals])
+                inlineValue = String(argument[argument.index(after: equals)...])
+            }
+            if let canonical = valueSpellings[spelling] {
+                if let inlineValue {
+                    parsed.values[canonical] = inlineValue
+                } else if index + 1 < arguments.count {
+                    parsed.values[canonical] = arguments[index + 1]
+                    index += 1
+                } else {
+                    errorLine("plumekit \(command): \(spelling) needs a value")
+                    return nil
+                }
+            } else if let canonical = boolSpellings[spelling], inlineValue == nil {
+                parsed.flags.insert(canonical)
+            } else {
+                errorLine("plumekit \(command): unknown option '\(argument)'")
+                errorLine("run `plumekit --help` for usage")
+                return nil
+            }
+        } else {
+            parsed.positionals.append(argument)
         }
         index += 1
     }
-    return (path, d1, dbName, assumeYes)
+    return parsed
+}
+
+/// The `--host`/`--port` pair `serve` and `dev` share, validated. Exits on a
+/// malformed port instead of quietly treating it as the project path.
+func parseServeOptions(_ arguments: [String], command: String) -> (host: String, port: UInt16, path: String)? {
+    guard let parsed = parseOptions(arguments, command: command,
+                                    valueSpellings: ["--host": "host", "-H": "host",
+                                                     "--port": "port", "-p": "port"]) else { return nil }
+    var port: UInt16 = 8080
+    if let raw = parsed.values["port"] {
+        guard let value = UInt16(raw), value > 0 else {
+            errorLine("plumekit \(command): invalid port '\(raw)'")
+            return nil
+        }
+        port = value
+    }
+    return (parsed.values["host"] ?? "127.0.0.1", port, parsed.positionals.first ?? ".")
 }
 
 guard let command = arguments.first else {
@@ -68,61 +122,21 @@ guard let command = arguments.first else {
 
 switch command {
 case "new":
-    var name: String?
-    var plumekitPath: String?
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        if arg == "--path", index + 1 < arguments.count {
-            plumekitPath = arguments[index + 1]; index += 1
-        } else if !arg.hasPrefix("-") && name == nil {
-            name = arg
-        }
-        index += 1
-    }
-    guard let projectName = name else {
+    guard let parsed = parseOptions(Array(arguments.dropFirst()), command: "new",
+                                    valueSpellings: ["--path": "path"]) else { exit(1) }
+    guard let projectName = parsed.positionals.first else {
         errorLine("usage: plumekit new <name> [--path <plumekit-dir>]")
         exit(1)
     }
-    exit(newCommand(name: projectName, plumekitPath: plumekitPath))
+    exit(newCommand(name: projectName, plumekitPath: parsed.values["path"]))
 
 case "serve":
-    var host = "127.0.0.1"
-    var port: UInt16 = 8080
-    var path = "."
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        switch arg {
-        case "--host":
-            if index + 1 < arguments.count { host = arguments[index + 1]; index += 1 }
-        case "--port":
-            if index + 1 < arguments.count, let p = UInt16(arguments[index + 1]) { port = p; index += 1 }
-        default:
-            if !arg.hasPrefix("-") { path = arg }
-        }
-        index += 1
-    }
-    exit(serveCommand(path: path, host: host, port: port))
+    guard let options = parseServeOptions(Array(arguments.dropFirst()), command: "serve") else { exit(1) }
+    exit(serveCommand(path: options.path, host: options.host, port: options.port))
 
 case "dev":
-    var host = "127.0.0.1"
-    var port: UInt16 = 8080
-    var path = "."
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        switch arg {
-        case "--host":
-            if index + 1 < arguments.count { host = arguments[index + 1]; index += 1 }
-        case "--port":
-            if index + 1 < arguments.count, let p = UInt16(arguments[index + 1]) { port = p; index += 1 }
-        default:
-            if !arg.hasPrefix("-") { path = arg }
-        }
-        index += 1
-    }
-    exit(devCommand(path: path, host: host, port: port))
+    guard let options = parseServeOptions(Array(arguments.dropFirst()), command: "dev") else { exit(1) }
+    exit(devCommand(path: options.path, host: options.host, port: options.port))
 
 case "doctor":
     exit(doctorCommand())
@@ -140,69 +154,92 @@ case "logout":
     exit(logoutCommand(arguments: Array(arguments.dropFirst())))
 
 case "routes":
-    var path = "."
-    var index = 1
-    while index < arguments.count {
-        if !arguments[index].hasPrefix("-") { path = arguments[index] }
-        index += 1
-    }
-    exit(routesCommand(path: path))
+    guard let parsed = parseOptions(Array(arguments.dropFirst()), command: "routes") else { exit(1) }
+    exit(routesCommand(path: parsed.positionals.first ?? "."))
 
 case "console":
-    var path = "."
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        if !arg.hasPrefix("-") { path = arg }
-        index += 1
-    }
-    exit(consoleCommand(path: path))
+    guard let parsed = parseOptions(Array(arguments.dropFirst()), command: "console") else { exit(1) }
+    exit(consoleCommand(path: parsed.positionals.first ?? "."))
 
 case "generate", "g":
     exit(generateCommand(arguments: Array(arguments.dropFirst())))
 
 case "migrate":
-    let opts = parseDBTargetArgs(arguments)
-    exit(migrateCommand(path: opts.path, d1: opts.d1, dbName: opts.dbName, assumeYes: opts.assumeYes))
+    guard let parsed = parseOptions(
+        Array(arguments.dropFirst()), command: "migrate",
+        valueSpellings: ["--db": "db"],
+        boolSpellings: ["--local": "local", "--remote": "remote", "--yes": "yes", "-y": "yes",
+                        "--status": "status", "--rollback": "rollback"]) else { exit(1) }
+    let d1: D1Target? = parsed.flags.contains("local") ? .local
+        : (parsed.flags.contains("remote") ? .remote : nil)
+    var path = "."
+    var rollbackSteps: Int? = nil
+    var positionals = parsed.positionals
+    if parsed.flags.contains("rollback") {
+        // `--rollback 2` — a leading integer positional is the step count.
+        rollbackSteps = 1
+        if let first = positionals.first, let steps = Int(first), steps > 0 {
+            rollbackSteps = steps
+            positionals.removeFirst()
+        }
+    }
+    if let remaining = positionals.first { path = remaining }
+    if parsed.flags.contains("status") {
+        exit(migrateStatusCommand(path: path, d1: d1))
+    }
+    if let rollbackSteps {
+        exit(migrateRollbackCommand(path: path, steps: rollbackSteps, d1: d1))
+    }
+    exit(migrateCommand(path: path, d1: d1, dbName: parsed.values["db"],
+                        assumeYes: parsed.flags.contains("yes")))
 
 case "seed":
-    let opts = parseDBTargetArgs(arguments)
+    guard let parsed = parseOptions(
+        Array(arguments.dropFirst()), command: "seed",
+        valueSpellings: ["--db": "db"],
+        boolSpellings: ["--local": "local", "--remote": "remote", "--yes": "yes", "-y": "yes"]) else { exit(1) }
+    let d1: D1Target? = parsed.flags.contains("local") ? .local
+        : (parsed.flags.contains("remote") ? .remote : nil)
     // A bare positional that isn't the project directory names a single seeder to run.
+    var path = "."
     var seedOnly: String?
-    if opts.path != "." && !FileManager.default.fileExists(atPath: opts.path + "/plumekit.toml") {
-        seedOnly = opts.path
+    for positional in parsed.positionals {
+        if FileManager.default.fileExists(atPath: positional + "/plumekit.toml") {
+            path = positional
+        } else {
+            seedOnly = positional
+        }
     }
-    exit(seedCommand(path: seedOnly != nil ? "." : opts.path, only: seedOnly,
-                     d1: opts.d1, dbName: opts.dbName, assumeYes: opts.assumeYes))
+    exit(seedCommand(path: path, only: seedOnly, d1: d1, dbName: parsed.values["db"],
+                     assumeYes: parsed.flags.contains("yes")))
 
 case "test":
+    // Only the leading positional is ours (the project path); everything else —
+    // `--filter Foo`, `--parallel`, … — passes through to `swift test` untouched.
+    // A leading bare word that is NOT a package is almost certainly a mistyped
+    // path — diagnose it rather than silently testing the current directory.
+    let rest = Array(arguments.dropFirst())
     var path = "."
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        if !arg.hasPrefix("-") { path = arg }
-        index += 1
+    var passthrough = rest
+    if let first = rest.first, !first.hasPrefix("-") {
+        guard FileManager.default.fileExists(atPath: first + "/Package.swift") else {
+            errorLine("plumekit test: no Package.swift at '\(first)'")
+            exit(1)
+        }
+        path = first
+        passthrough = Array(rest.dropFirst())
     }
-    exit(testCommand(path: path))
+    exit(testCommand(path: path, extraArguments: passthrough))
 
 case "build":
-    var target: String?
-    var path = "."
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        if arg == "--target", index + 1 < arguments.count {
-            target = arguments[index + 1]; index += 1
-        } else if !arg.hasPrefix("-") {
-            path = arg
-        }
-        index += 1
-    }
+    guard let parsed = parseOptions(Array(arguments.dropFirst()), command: "build",
+                                    valueSpellings: ["--target": "target"]) else { exit(1) }
+    let path = parsed.positionals.first ?? "."
     // Resolve which target(s) to build. `--target` overrides; otherwise read the
     // `[build]` section of plumekit.toml. `--target all` builds every declared target.
     let config = BuildConfig.read(projectPath: path)
     let requested: [String]
-    if let target {
+    if let target = parsed.values["target"] {
         requested = (target == "all") ? config.targets : [target]
     } else {
         requested = config.resolvedTargets
@@ -227,32 +264,18 @@ case "build":
     exit(0)
 
 case "deploy":
-    var target: String?
-    var path = "."
-    var skipMigrations = false
-    var seedOverride: Bool?
-    var index = 1
-    while index < arguments.count {
-        let arg = arguments[index]
-        if arg == "--target", index + 1 < arguments.count {
-            target = arguments[index + 1]; index += 1
-        } else if arg == "--skip-migrations" {
-            skipMigrations = true
-        } else if arg == "--seed" {
-            seedOverride = true
-        } else if arg == "--skip-seed" {
-            seedOverride = false
-        } else if !arg.hasPrefix("-") {
-            path = arg
-        }
-        index += 1
-    }
+    guard let parsed = parseOptions(
+        Array(arguments.dropFirst()), command: "deploy",
+        valueSpellings: ["--target": "target"],
+        boolSpellings: ["--skip-migrations": "skip-migrations", "--seed": "seed",
+                        "--skip-seed": "skip-seed"]) else { exit(1) }
+    let path = parsed.positionals.first ?? "."
     // Migrate → seed → build → deploy, for the target(s) from `--target` or
     // plumekit.toml's [build]. [deploy] migrate/seed set the defaults; --skip-migrations
     // and --seed / --skip-seed override them.
     let deployConfig = BuildConfig.read(projectPath: path)
     let deployTargets: [String]
-    if let target {
+    if let target = parsed.values["target"] {
         deployTargets = (target == "all") ? deployConfig.targets : [target]
     } else {
         deployTargets = deployConfig.resolvedTargets
@@ -262,8 +285,9 @@ case "deploy":
         errorLine("[build] default / targets in plumekit.toml.")
         exit(1)
     }
-    let runMigrate = deployConfig.deployMigrate && !skipMigrations
-    let runSeed = seedOverride ?? deployConfig.deploySeed
+    let runMigrate = deployConfig.deployMigrate && !parsed.flags.contains("skip-migrations")
+    let runSeed = parsed.flags.contains("seed") ? true
+        : (parsed.flags.contains("skip-seed") ? false : deployConfig.deploySeed)
     for deployTarget in deployTargets {
         let status = deployCommand(target: deployTarget, path: path, outDir: deployConfig.out,
                                    migrate: runMigrate, seed: runSeed)

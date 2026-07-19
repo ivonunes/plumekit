@@ -85,7 +85,7 @@ import PlumeORM
         let list = String(decoding: Response.json([one, two]).body, as: UTF8.self)
         #expect(list.hasPrefix("[") && list.contains("sprocket"))
 
-        let page = try await Gadget.all().order(by: Gadget.id).paginate(limit: 1, in: db)
+        let page = try await Gadget.query().order(by: Gadget.id).paginate(limit: 1, in: db)
         let paged = String(decoding: Response.json(page).body, as: UTF8.self)
         #expect(paged.contains("\"hasMore\":true") && paged.contains("\"limit\":1"))
     }

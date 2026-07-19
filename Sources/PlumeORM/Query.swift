@@ -66,6 +66,16 @@ public func <= <Root, Value: SQLValueConvertible & Comparable>(lhs: Column<Root,
 
 // MARK: - Logical combinators (Predicate ⊕ Predicate → Predicate)
 
+extension Column where Value: SQLValueConvertible {
+    /// `column IN (…)` — the batching primitive: a page preloads an association
+    /// set in ONE query instead of one per row. An empty list matches nothing.
+    public func within(_ values: [Value]) -> Predicate<Root> {
+        guard !values.isEmpty else { return Predicate(sql: "1 = 0", bindings: []) }
+        return Predicate(sql: name + " IN (" + placeholders(values.count) + ")",
+                         bindings: values.map { $0.asSQLValue })
+    }
+}
+
 public func && <Root>(lhs: Predicate<Root>, rhs: Predicate<Root>) -> Predicate<Root> {
     Predicate(sql: "(" + lhs.sql + ") AND (" + rhs.sql + ")", bindings: lhs.bindings + rhs.bindings)
 }
@@ -150,10 +160,13 @@ public struct Query<M: Model> {
         return copy
     }
 
+    /// Add a sort column. Chained calls COMPOSE into a multi-column ORDER BY
+    /// (`.order(by: Post.published).order(by: Post.views, .descending)` sorts by
+    /// published, then views) — a later call never silently replaces an earlier one.
     public func order<V>(by column: Column<M, V>, _ direction: SortDirection = .ascending) -> Query<M> {
         var copy = self
-        let dir = direction == .descending ? " DESC" : " ASC"
-        copy.orderClause = column.name + dir
+        let clause = column.name + (direction == .descending ? " DESC" : " ASC")
+        copy.orderClause = orderClause.map { $0 + ", " + clause } ?? clause
         return copy
     }
 
@@ -202,7 +215,7 @@ public struct Query<M: Model> {
                     limit: limit, offset: offset, hasMore: hasMore, total: total)
     }
 
-    /// Page-number pagination (1-based): `Post.all().order(by: Post.id).paginate(page: 2, per: 20)`.
+    /// Page-number pagination (1-based): `Post.query().order(by: Post.id).paginate(page: 2, per: 20)`.
     /// `withTotal: true` also runs a COUNT so the page carries `total`/`totalPages`.
     public func paginate(page: Int, per: Int, withTotal: Bool = false,
                          in db: Database? = nil) async throws -> Page<M> {
@@ -213,6 +226,19 @@ public struct Query<M: Model> {
         // absurd offset just yields an empty page rather than crashing the worker.
         let (product, overflow) = (page - 1).multipliedReportingOverflow(by: per)
         return try await paginate(limit: per, offset: overflow ? Int.max : product, withTotal: withTotal, in: db)
+    }
+
+    /// Pagination straight from a request: reads the `page`/`per` query params —
+    /// the same names `Page.url`/`nextURL` emit, so the links a page renders and
+    /// the params a handler reads are two halves of one feature. `per` is clamped
+    /// to `maxPer` (query params are user input).
+    ///
+    ///     let page = try await Post.query().order(by: Post.id).paginate(request)
+    public func paginate(_ request: Request, per defaultPer: Int = 20, maxPer: Int = 100,
+                         withTotal: Bool = false, in db: Database? = nil) async throws -> Page<M> {
+        let page = request.queryParams.int("page") ?? 1
+        let per = min(max(1, maxPer), max(1, request.queryParams.int("per") ?? defaultPer))
+        return try await paginate(page: page, per: per, withTotal: withTotal, in: db)
     }
 
     /// The first matching row, or nil.
@@ -230,13 +256,172 @@ public struct Query<M: Model> {
         guard let row = result.rows.first else { return 0 }
         return Row(row).int(0)
     }
+
+    /// Whether any row matches — `SELECT 1 … LIMIT 1`, so unlike `count() > 0`
+    /// the database stops at the first hit.
+    public func exists(in db: Database? = nil) async throws -> Bool {
+        let db = resolvedDatabase(db)
+        let predicate = effectivePredicate
+        var sql = "SELECT 1 FROM " + M.schema.table
+        if let predicate { sql += " WHERE " + predicate.sql }
+        sql += " LIMIT 1"
+        let result = try await db.query(sql, predicate?.bindings ?? [])
+        return !result.rows.isEmpty
+    }
+
+    /// A single column's values, without decoding whole rows.
+    /// `LodgingAssignment.where(…).pluck(LodgingAssignment.user_id)`.
+    public func pluck<Value>(_ column: Column<M, Value>,
+                             in db: Database? = nil) async throws -> [SQLValue] {
+        let db = resolvedDatabase(db)
+        let predicate = effectivePredicate
+        var sql = "SELECT " + column.name + " FROM " + M.schema.table
+        if let predicate { sql += " WHERE " + predicate.sql }
+        if let orderClause { sql += " ORDER BY " + orderClause }
+        if let limitCount { sql += " LIMIT " + integerLiteral(limitCount) }
+        else if offsetCount != nil { sql += " LIMIT " + integerLiteral(Int.max) }  // SQLite: LIMIT must precede OFFSET
+        if let offsetCount { sql += " OFFSET " + integerLiteral(offsetCount) }
+        let result = try await db.query(sql, predicate?.bindings ?? [])
+        return result.rows.map { Row($0).value(0) }
+    }
+
+    /// `pluck` for integer columns (the common id/foreign-key case), decoded with
+    /// `Row`'s coercions.
+    public func pluckInts(_ column: Column<M, Int>,
+                          in db: Database? = nil) async throws -> [Int] {
+        try await pluck(column, in: db).map { Row([$0]).int(0) }
+    }
+
+    // MARK: Bulk writes (one statement, no per-row loads — Rails' delete_all/update_all)
+
+    /// DELETE every matching row in one statement. Respects the model's
+    /// `defaultScope` (a soft-deletable model's live rows only — use
+    /// `withTrashed().delete()` to purge). Model callbacks do NOT run — this never
+    /// loads the rows. Returns the number of rows deleted.
+    @discardableResult
+    public func delete(in db: Database? = nil) async throws -> Int {
+        let db = resolvedDatabase(db)
+        let predicate = effectivePredicate
+        var sql = "DELETE FROM " + M.schema.table
+        if let predicate { sql += " WHERE " + predicate.sql }
+        let result = try await db.query(sql, predicate?.bindings ?? [])
+        return result.rowsAffected
+    }
+
+    /// UPDATE every matching row in one statement:
+    /// `Post.where(Post.published == false).updateAll(Post.views.set(0))`.
+    /// Like `delete()`, callbacks/validations/timestamps do NOT run. Returns the
+    /// number of rows updated.
+    @discardableResult
+    public func updateAll(_ assignments: Assignment<M>..., in db: Database? = nil) async throws -> Int {
+        guard !assignments.isEmpty else { return 0 }
+        let db = resolvedDatabase(db)
+        let predicate = effectivePredicate
+        var setClause = ""
+        var bindings: [SQLValue] = []
+        for assignment in assignments {
+            if !setClause.isEmpty { setClause += ", " }
+            setClause += assignment.sql
+            bindings.append(contentsOf: assignment.bindings)
+        }
+        var sql = "UPDATE " + M.schema.table + " SET " + setClause
+        if let predicate {
+            sql += " WHERE " + predicate.sql
+            bindings.append(contentsOf: predicate.bindings)
+        }
+        let result = try await db.query(sql, bindings)
+        return result.rowsAffected
+    }
+
+    // MARK: Aggregates (single value, no row decoding)
+    // Cells decode through `Row`'s coercions — the one home for SQLValue→number
+    // semantics (a backend can hand SUM/AVG back as `.double`; `Row` wraps rather
+    // than trapping on out-of-range values).
+
+    /// SUM of an integer column over the matching rows (0 with no rows).
+    public func sum(_ column: Column<M, Int>, in db: Database? = nil) async throws -> Int {
+        try await aggregate("SUM", column.name, in: db).map { Row([$0]).int(0) } ?? 0
+    }
+
+    /// SUM of a real column over the matching rows (0 with no rows).
+    public func sum(_ column: Column<M, Double>, in db: Database? = nil) async throws -> Double {
+        try await aggregate("SUM", column.name, in: db).map { Row([$0]).double(0) } ?? 0
+    }
+
+    /// AVG over the matching rows, or nil with no rows.
+    public func average(_ column: Column<M, Int>, in db: Database? = nil) async throws -> Double? {
+        try await aggregate("AVG", column.name, in: db).flatMap { Row([$0]).doubleOptional(0) }
+    }
+
+    public func average(_ column: Column<M, Double>, in db: Database? = nil) async throws -> Double? {
+        try await aggregate("AVG", column.name, in: db).flatMap { Row([$0]).doubleOptional(0) }
+    }
+
+    /// MIN/MAX over the matching rows, or nil with no rows.
+    public func minimum(_ column: Column<M, Int>, in db: Database? = nil) async throws -> Int? {
+        try await aggregate("MIN", column.name, in: db).flatMap { Row([$0]).intOptional(0) }
+    }
+
+    public func maximum(_ column: Column<M, Int>, in db: Database? = nil) async throws -> Int? {
+        try await aggregate("MAX", column.name, in: db).flatMap { Row([$0]).intOptional(0) }
+    }
+
+    public func minimum(_ column: Column<M, Double>, in db: Database? = nil) async throws -> Double? {
+        try await aggregate("MIN", column.name, in: db).flatMap { Row([$0]).doubleOptional(0) }
+    }
+
+    public func maximum(_ column: Column<M, Double>, in db: Database? = nil) async throws -> Double? {
+        try await aggregate("MAX", column.name, in: db).flatMap { Row([$0]).doubleOptional(0) }
+    }
+
+    /// The raw aggregate cell (`nil` when SQL returns NULL, e.g. no rows).
+    /// `function` and `columnName` are ASCII tokens from typed columns, never user input.
+    private func aggregate(_ function: String, _ columnName: String,
+                           in db: Database?) async throws -> SQLValue? {
+        let db = resolvedDatabase(db)
+        let predicate = effectivePredicate
+        var sql = "SELECT " + function + "(" + columnName + ") FROM " + M.schema.table
+        if let predicate { sql += " WHERE " + predicate.sql }
+        let result = try await db.query(sql, predicate?.bindings ?? [])
+        guard let row = result.rows.first else { return nil }
+        if case .null = row[0] { return nil }
+        return row[0]
+    }
 }
+
+/// A `SET` clause fragment for `updateAll`, built from a typed column:
+/// `Post.views.set(0)` → `views = ?`. Value type, Embedded-clean.
+public struct Assignment<Root> {
+    let sql: String
+    let bindings: [SQLValue]
+}
+
+extension Column where Value: SQLValueConvertible {
+    /// An assignment for `Query.updateAll`: `Post.published.set(true)`.
+    public func set(_ value: Value) -> Assignment<Root> {
+        Assignment(sql: name + " = ?", bindings: [value.asSQLValue])
+    }
+}
+
 
 // MARK: - Model query entry points
 
 extension Model {
-    /// All rows: `Post.all().order(by:).all(in:)` or just `Post.all().all(in:)`.
-    public static func all() -> Query<Self> { Query<Self>() }
+    /// Start an unfiltered query builder: `Post.query().order(by: Post.id).all(in: db)`.
+    /// (The entry point is `query()` and the executing terminal is `all(in:)`, so
+    /// which call hits the database is always visible at the call site.)
+    public static func query() -> Query<Self> { Query<Self>() }
+
+    /// Every row, directly: `try await Post.all()` inside a request (ambient
+    /// database), `Post.all(in: db)` elsewhere.
+    public static func all(in db: Database? = nil) async throws -> [Self] {
+        try await Query<Self>().all(in: db)
+    }
+
+    /// Every-row COUNT without a builder: `try await Post.count(in: db)`.
+    public static func count(in db: Database? = nil) async throws -> Int {
+        try await Query<Self>().count(in: db)
+    }
 
     /// Start a filtered query: `Post.where(Post.views > 100)`.
     public static func `where`(_ p: Predicate<Self>) -> Query<Self> {

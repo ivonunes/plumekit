@@ -31,6 +31,12 @@ public enum PlumeServer {
     /// tests can shorten it.
     nonisolated(unsafe) static var requestHeadTimeoutMillis = 15_000
 
+    /// The body-side counterpart: a request BODY that stalls for this long between
+    /// chunks closes the connection (armed at the head, reset per chunk, disarmed at
+    /// `.end`). Without it, a dribbling upload — especially on an uncapped streaming
+    /// route — holds a handler task open indefinitely. `var` so tests can shorten it.
+    nonisolated(unsafe) static var requestBodyIdleTimeoutMillis = 60_000
+
     /// Bind to `host:port` and serve `app` forever. `context` carries the native
     /// bindings (KV/DB/blob/queue/http), reused across requests.
     // A connection is negotiated into one of these by the upgradable pipeline.
@@ -53,15 +59,9 @@ public enum PlumeServer {
         NativeDrivers.installNativeClock()  // ORM createdAt/updatedAt source
 
         // Static files: serve the project's `Public/` directory (by convention) when it
-        // exists. Resolved once to an absolute path so per-request lookups can't be fooled
-        // by a changing working directory.
-        let publicRoot: String? = {
-            let dir = publicDirectory ?? "Public"
-            let absolute = dir.hasPrefix("/") ? dir : FileManager.default.currentDirectoryPath + "/" + dir
-            var isDirectory: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: absolute, isDirectory: &isDirectory)
-            return exists && isDirectory.boolValue ? absolute : nil
-        }()
+        // exists. Resolved once (absolute, symlink-free) so per-request containment
+        // checks are cheap and can't be fooled by a changing working directory.
+        let publicRoot = StaticFiles.resolveRoot(publicDirectory ?? "Public")
         if let publicRoot { print("Serving static files from \(publicRoot)") }
 
         // The native job consumer: drain the in-process queue and dispatch jobs in
@@ -124,6 +124,11 @@ public enum PlumeServer {
                         upgraders: [upgrader],
                         notUpgradingCompletionHandler: { channel in
                             channel.eventLoop.makeCompletedFuture {
+                                // Body-idle guard on the HTTP path (WebSocket pipelines
+                                // never see it): sits above the decoder, so it watches
+                                // typed parts, not raw bytes.
+                                try channel.pipeline.syncOperations.addHandler(
+                                    RequestBodyIdleTimeout(timeout: .milliseconds(Int64(Self.requestBodyIdleTimeoutMillis))))
                                 let http = try NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>(
                                     wrappingChannelSynchronously: channel)
                                 return UpgradeResult.notUpgraded(http)
@@ -257,30 +262,84 @@ public enum PlumeServer {
     ) async throws {
         try await channel.executeThenClose { inbound, outbound in
             var head: HTTPRequestHead?
-            var body = ByteBuffer()
-            var oversized = false
+            var body: [UInt8] = []
+            var streaming: (pipe: BodyPipe, task: Task<Response, Never>)?
             var sse: (room: String, id: Int)?
-            for try await part in inbound {
+            // The loop can end abnormally (client disconnect, a reset, the body-idle
+            // guard closing the channel) — the cleanup below must run on EVERY exit:
+            // a streaming handler suspended on its pipe would otherwise leak forever,
+            // and an SSE subscriber would stay in the hub.
+            var iterationError: (any Error)?
+            do {
+            receive: for try await part in inbound {
                 switch part {
                 case .head(let h):
                     head = h
-                    body.clear()
-                    oversized = false
-                case .body(var chunk):
-                    // Cap the buffered body so a huge (or lying `Content-Length`) upload
-                    // can't OOM the server. Once over, answer 413 and stop buffering.
-                    if oversized { break }
-                    if body.readableBytes + chunk.readableBytes > Self.maxRequestBodyBytes {
-                        oversized = true
-                        body.clear()
-                        try await write(Response.text("413 Payload Too Large", status: 413), to: outbound)
-                        head = nil
+                    body.removeAll()   // capacity was released after the last response anyway
+                    // A `.streaming` route gets its handler started NOW, fed live
+                    // chunks through a rendezvous pipe (no buffering, no body cap —
+                    // that's the point). Everything else buffers as usual.
+                    if let method = plumekitMethod(h.method),
+                       method == .post || method == .put || method == .patch,
+                       app.requestBodyMode(method, splitURI(h.uri).0) == .streaming {
+                        let pipe = BodyPipe()
+                        let reader = RequestBodyReader { try await pipe.next() }
+                        let task = Task {
+                            let response = await respond(head: h, body: [], reader: reader,
+                                                         app: app, context: context)
+                            await pipe.consumerFinished()
+                            return response
+                        }
+                        streaming = (pipe, task)
                         break
                     }
-                    body.writeBuffer(&chunk)
+                    // Reserve from the declared length so a large upload appends into
+                    // one allocation instead of growing through reallocation-copies.
+                    // Clamped to the cap: a lying Content-Length can't reserve 32 MB+.
+                    if let declared = h.headers.first(name: "content-length").flatMap({ Int($0) }),
+                       declared > 0 {
+                        body.reserveCapacity(min(declared, Self.maxRequestBodyBytes))
+                    }
+                case .body(let chunk):
+                    if let streaming {
+                        await streaming.pipe.send([UInt8](chunk.readableBytesView))
+                        break
+                    }
+                    // Cap the buffered body so a huge (or lying `Content-Length`) upload
+                    // can't OOM the server. Once over, answer 413 and close — mid-body
+                    // there is no reliable way to resync the connection for reuse. Drain
+                    // (bounded) what the client is still sending before closing: an
+                    // immediate close while data is in flight makes the kernel RST, and
+                    // the client then reports a reset instead of ever seeing the 413.
+                    if body.count + chunk.readableBytes > Self.maxRequestBodyBytes {
+                        try await write(Response.text("413 Payload Too Large", status: 413),
+                                        to: outbound, keepAlive: false)
+                        var drained = 0
+                        for try await part in inbound {
+                            if case .end = part { break }
+                            if case .body(let extra) = part {
+                                drained += extra.readableBytes
+                                if drained > Self.maxRequestBodyBytes { break }   // don't linger forever
+                            }
+                        }
+                        break receive
+                    }
+                    body.append(contentsOf: chunk.readableBytesView)
                 case .end:
-                    if oversized { oversized = false; head = nil; break }   // already answered 413
                     guard let h = head else { break }
+                    if let current = streaming {
+                        await current.pipe.finish()
+                        let response = await current.task.value
+                        let keepAlive = h.isKeepAlive && channels == nil
+                        let acceptsGzip = h.headers.first(name: "accept-encoding")
+                            .map { $0.lowercased().contains("gzip") } ?? false
+                        try await write(response, to: outbound, keepAlive: keepAlive,
+                                        acceptsGzip: acceptsGzip)
+                        streaming = nil
+                        head = nil
+                        if !keepAlive { break receive }
+                        break
+                    }
                     // SSE: a one-way server→client stream over HTTP. Simpler
                     // than WebSockets — no coordination/DO needed; the hub feeds it.
                     if let channels, h.method == .GET, pathComponent(h.uri) == "/sse" {
@@ -292,9 +351,9 @@ public enum PlumeServer {
                             let now = Int(time(nil))
                             guard let token,
                                   ChannelToken.verify(token, channel: ChannelID(room), now: now, key: key) else {
-                                try await write(Response.text("403 Forbidden", status: 403), to: outbound)
-                                head = nil
-                                continue
+                                try await write(Response.text("403 Forbidden", status: 403),
+                                                to: outbound, keepAlive: false)
+                                break receive
                             }
                         }
                         var headers = HTTPHeaders()
@@ -310,16 +369,179 @@ public enum PlumeServer {
                             try? await outbound.write(.body(.byteBuffer(buffer)))
                         }
                         sse = (room, id)   // stream until the client disconnects (inbound ends)
+                    } else if isUpgradeRequest(h) {
+                        // A WebSocket handshake on an already-negotiated HTTP connection
+                        // (a client reusing a pooled keep-alive connection — Node's
+                        // undici does this). NIO's upgrade handler only exists for a
+                        // connection's FIRST request, so upgrading here is impossible;
+                        // answer 426 and close so the connection leaves the client's pool.
+                        try await write(Response.text("426 Upgrade Required", status: 426),
+                                        to: outbound, keepAlive: false)
+                        break receive
                     } else {
-                        let response = await respond(head: h, body: body, app: app,
-                                                     context: context, publicRoot: publicRoot)
-                        try await write(response, to: outbound)
+                        // HTTP/1.1 defaults to persistent connections; close only when the
+                        // client asked to (or is HTTP/1.0 without keep-alive). With realtime
+                        // channels enabled, every response closes instead: an idle kept-alive
+                        // connection is a trap for WebSocket clients that reuse pooled
+                        // connections for the handshake — the upgrade can only ever happen
+                        // on a connection's first request (see above).
+                        let keepAlive = h.isKeepAlive && channels == nil
+                        let acceptsGzip = h.headers.first(name: "accept-encoding")
+                            .map { $0.lowercased().contains("gzip") } ?? false
+                        var served = false
+                        if let publicRoot, let method = plumekitMethod(h.method),
+                           method == .get || method == .head {
+                            served = try await serveStatic(head: h, method: method, root: publicRoot,
+                                                           eventLoop: channel.channel.eventLoop,
+                                                           outbound: outbound, keepAlive: keepAlive,
+                                                           acceptsGzip: acceptsGzip)
+                        }
+                        if !served {
+                            let response = await respond(head: h, body: body, app: app, context: context)
+                            try await write(response, to: outbound, keepAlive: keepAlive,
+                                            acceptsGzip: acceptsGzip)
+                        }
                         head = nil
+                        body = []   // don't hold a request body across an idle keep-alive
+                        if !keepAlive { break receive }
                     }
                 }
             }
+            } catch {
+                iterationError = error
+            }
+            if let current = streaming { await current.pipe.fail() }
             if let sse { await channels?.unsubscribe(room: sse.room, id: sse.id) }
+            if let iterationError { throw iterationError }
         }
+    }
+
+    /// Reads for static files run on NIO's thread pool, not the Swift cooperative
+    /// pool — a large download must never starve request handling.
+    private static let fileIO = NonBlockingFileIO(threadPool: .singleton)
+    private static let fileChunkBytes = 128 * 1024
+
+    /// Answer a GET/HEAD from `Public/` if the path maps to a file there: 304 when the
+    /// client's validator still matches, otherwise the file streamed in fixed-size
+    /// chunks (never buffered whole). Returns false to fall through to routes.
+    /// Compressible static files up to this size are gzipped whole (text bundles
+    /// are small); anything larger streams uncompressed rather than being buffered.
+    private static let maxCompressibleFileBytes = 4 * 1024 * 1024
+
+    private static func serveStatic(
+        head h: HTTPRequestHead,
+        method: PlumeCore.HTTPMethod,
+        root: String,
+        eventLoop: EventLoop,
+        outbound: NIOAsyncChannelOutboundWriter<HTTPServerResponsePart>,
+        keepAlive: Bool,
+        acceptsGzip: Bool
+    ) async throws -> Bool {
+        let (path, _) = splitURI(h.uri)
+        guard let info = StaticFiles.lookup(requestPath: path, root: root) else { return false }
+
+        let compressible = GzipCompression.isCompressibleContentType(info.contentType)
+        var headers = HTTPHeaders()
+        headers.add(name: "content-type", value: info.contentType)
+        headers.add(name: "cache-control", value: info.cacheControl)
+        headers.add(name: "etag", value: info.etag)
+        headers.add(name: "last-modified", value: info.lastModified)
+        if compressible { headers.add(name: "vary", value: "Accept-Encoding") }
+        headers.add(name: "connection", value: keepAlive ? "keep-alive" : "close")
+
+        // `contains` covers both a single ETag and an `a, b, c` list from the client.
+        if let match = h.headers.first(name: "if-none-match"), match.contains(info.etag) {
+            try await outbound.write(.head(HTTPResponseHead(version: .http1_1, status: .notModified,
+                                                            headers: headers)))
+            try await outbound.write(.end(nil))
+            return true
+        }
+
+        let wantsCompressed = method == .get && compressible && acceptsGzip
+            && info.size >= GzipCompression.minimumBytes && info.size <= Self.maxCompressibleFileBytes
+
+        // The compressed representation is cached by ETag (a hit skips the disk
+        // entirely — the same bundle file is requested on every page view).
+        if wantsCompressed, let cached = GzipCompression.assetCache.lookup(info.etag) {
+            headers.add(name: "content-encoding", value: "gzip")
+            headers.add(name: "content-length", value: String(cached.count))
+            try await outbound.write(.head(HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)))
+            var out = ByteBuffer()
+            out.writeBytes(cached)
+            try await outbound.write(.body(.byteBuffer(out)))
+            try await outbound.write(.end(nil))
+            return true
+        }
+
+        // Open BEFORE committing the response head: a file deleted or made
+        // unreadable between stat and open then falls through to the app's routes
+        // (a clean 404) instead of dying mid-response after a 200 is on the wire.
+        var handle: NIOFileHandle? = nil
+        if method == .get, info.size > 0 {
+            guard let opened = try? StaticFiles.open(info.path) else { return false }
+            handle = opened
+        }
+
+        // A compressible text asset for a gzip-capable client: read it whole (they
+        // are small — the CSS/JS bundles this exists for), compress once, cache.
+        if let openedHandle = handle, wantsCompressed {
+            defer { StaticFiles.close(openedHandle) }
+            let buffer = try await fileIO.read(fileHandle: openedHandle, fromOffset: 0,
+                                               byteCount: info.size,
+                                               allocator: ByteBufferAllocator(),
+                                               eventLoop: eventLoop).get()
+            guard buffer.readableBytes == info.size,
+                  let bytes = buffer.getBytes(at: buffer.readerIndex, length: buffer.readableBytes) else {
+                throw StaticFileTruncated()
+            }
+            var body = bytes
+            if let compressed = GzipCompression.gzip(bytes), compressed.count < bytes.count {
+                body = compressed
+                headers.add(name: "content-encoding", value: "gzip")
+                GzipCompression.assetCache.store(info.etag, compressed)
+            }
+            headers.add(name: "content-length", value: String(body.count))
+            try await outbound.write(.head(HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)))
+            var out = ByteBuffer()
+            out.writeBytes(body)
+            try await outbound.write(.body(.byteBuffer(out)))
+            try await outbound.write(.end(nil))
+            return true
+        }
+
+        headers.add(name: "content-length", value: String(info.size))
+        try await outbound.write(.head(HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)))
+        if let handle {
+            // Chunked copies, not a FileRegion: the async writer completes a write on
+            // ENQUEUE, so there is no safe point to close a sendfile descriptor.
+            // Buffered chunks carry their own bytes — closing after the loop is safe
+            // even while the tail is still flushing.
+            defer { StaticFiles.close(handle) }
+            let allocator = ByteBufferAllocator()
+            var offset: Int64 = 0
+            while offset < Int64(info.size) {
+                let chunk = try await fileIO.read(
+                    fileHandle: handle, fromOffset: offset,
+                    byteCount: min(fileChunkBytes, Int(Int64(info.size) - offset)),
+                    allocator: allocator, eventLoop: eventLoop).get()
+                if chunk.readableBytes == 0 { break }
+                offset += Int64(chunk.readableBytes)
+                try await outbound.write(.body(.byteBuffer(chunk)))
+            }
+            // Truncated since stat: the promised Content-Length can't be honoured, so
+            // fail the connection rather than desync a keep-alive stream.
+            guard offset == Int64(info.size) else { throw StaticFileTruncated() }
+        }
+        try await outbound.write(.end(nil))
+        return true
+    }
+
+    /// Whether a request head asks to switch protocols (RFC 9110 §7.8):
+    /// `Connection: upgrade` + `Upgrade: websocket`.
+    private static func isUpgradeRequest(_ head: HTTPRequestHead) -> Bool {
+        let upgrades = head.headers[canonicalForm: "upgrade"]
+        guard upgrades.contains(where: { $0.lowercased() == "websocket" }) else { return false }
+        return head.headers[canonicalForm: "connection"].contains { $0.lowercased() == "upgrade" }
     }
 
     private static func pathComponent(_ uri: String) -> String {
@@ -329,29 +551,33 @@ public enum PlumeServer {
 
     private static func respond(
         head: HTTPRequestHead,
-        body: ByteBuffer,
+        body: [UInt8],
+        reader: RequestBodyReader? = nil,
         app: Application,
-        context: Context,
-        publicRoot: String?
+        context: Context
     ) async -> Response {
         guard let method = plumekitMethod(head.method) else {
             return Response.text("405 Method Not Allowed", status: 405)
         }
         let (path, query) = splitURI(head.uri)
 
-        // Static files take priority for GET/HEAD; a miss falls through to the app's routes.
-        if method == .get || method == .head, let publicRoot,
-           let file = StaticFiles.response(for: path, in: publicRoot) {
-            if method == .head { var headOnly = file; headOnly.body = []; return headOnly }
-            return file
+        // Live-reload plumbing, development only: the boot-id poll endpoint, and
+        // the poller injected into HTML pages below.
+        if developmentMode, method == .get, path == DevReload.path {
+            var response = Response.text(DevReload.bootID)
+            response.headers.set("cache-control", "no-store")
+            return response
         }
+
         var headers = Headers()
         for field in head.headers { headers.add(field.name, field.value) }
-        let bytes = body.getBytes(at: body.readerIndex, length: body.readableBytes) ?? []
-        let request = Request(method: method, path: path, query: query,
-                              headers: headers, body: bytes, context: context)
+        var request = Request(method: method, path: path, query: query,
+                              headers: headers, body: body, context: context)
+        request.bodyReader = reader
         do {
-            return try await app.handleThrowing(request)
+            var response = try await app.handleThrowing(request)
+            if developmentMode { response = DevReload.inject(into: response) }
+            return response
         } catch {
             // Always log the error (a silent 500 helps nobody). In development, render
             // the full error page; in production, the clean 500.
@@ -372,7 +598,9 @@ public enum PlumeServer {
 
     private static func write(
         _ response: Response,
-        to outbound: NIOAsyncChannelOutboundWriter<HTTPServerResponsePart>
+        to outbound: NIOAsyncChannelOutboundWriter<HTTPServerResponsePart>,
+        keepAlive: Bool,
+        acceptsGzip: Bool = false
     ) async throws {
         var headers = HTTPHeaders()
         // Strip CR/LF/NUL from every header value so an attacker-influenced value (e.g. a
@@ -381,15 +609,74 @@ public enum PlumeServer {
         for field in response.headers.fields {
             headers.add(name: field.name, value: field.value.filter { $0 != "\r" && $0 != "\n" && $0 != "\0" })
         }
-        headers.replaceOrAdd(name: "content-length", value: String(response.body.count))
-        headers.replaceOrAdd(name: "connection", value: "close")
+
+        // A streamed body: no Content-Length, so NIO's encoder frames it as chunked
+        // transfer encoding — each written chunk reaches the client as it comes.
+        // Compressible streams are gzipped INCREMENTALLY (each chunk sync-flushed
+        // through the deflater), so promptness is preserved.
+        if let produce = response.bodyStream {
+            headers.remove(name: "content-length")
+            let streamer: GzipCompression.Streamer? = {
+                guard acceptsGzip, headers.first(name: "content-encoding") == nil,
+                      let contentType = headers.first(name: "content-type"),
+                      GzipCompression.isCompressibleContentType(contentType) else { return nil }
+                return GzipCompression.Streamer()
+            }()
+            if streamer != nil {
+                headers.add(name: "content-encoding", value: "gzip")
+                if !headers.contains(name: "vary") { headers.add(name: "vary", value: "Accept-Encoding") }
+            }
+            headers.replaceOrAdd(name: "connection", value: keepAlive ? "keep-alive" : "close")
+            let responseHead = HTTPResponseHead(
+                version: .http1_1,
+                status: HTTPResponseStatus(statusCode: response.status, reasonPhrase: response.reasonPhrase),
+                headers: headers)
+            try await outbound.write(.head(responseHead))
+            try await produce(ResponseBodyWriter(write: { bytes in
+                var out = bytes
+                if let streamer {
+                    guard let compressed = streamer.push(bytes) else { throw StreamCompressionFailed() }
+                    out = compressed
+                }
+                if out.isEmpty { return }
+                var buffer = ByteBuffer()
+                buffer.writeBytes(out)
+                try await outbound.write(.body(.byteBuffer(buffer)))
+            }))
+            if let streamer {
+                guard let trailer = streamer.finish() else { throw StreamCompressionFailed() }
+                if !trailer.isEmpty {
+                    var buffer = ByteBuffer()
+                    buffer.writeBytes(trailer)
+                    try await outbound.write(.body(.byteBuffer(buffer)))
+                }
+            }
+            try await outbound.write(.end(nil))
+            return
+        }
+
+        var body = response.body
+        // gzip compressible bodies the client asked for (and that actually shrink).
+        // A handler that set its own Content-Encoding is passed through untouched.
+        if acceptsGzip, body.count >= GzipCompression.minimumBytes,
+           headers.first(name: "content-encoding") == nil,
+           let contentType = headers.first(name: "content-type"),
+           GzipCompression.isCompressibleContentType(contentType) {
+            if !headers.contains(name: "vary") { headers.add(name: "vary", value: "Accept-Encoding") }
+            if let compressed = GzipCompression.gzip(body), compressed.count < body.count {
+                body = compressed
+                headers.add(name: "content-encoding", value: "gzip")
+            }
+        }
+        headers.replaceOrAdd(name: "content-length", value: String(body.count))
+        headers.replaceOrAdd(name: "connection", value: keepAlive ? "keep-alive" : "close")
         let responseHead = HTTPResponseHead(
             version: .http1_1,
             status: HTTPResponseStatus(statusCode: response.status, reasonPhrase: response.reasonPhrase),
             headers: headers)
         try await outbound.write(.head(responseHead))
         var buffer = ByteBuffer()
-        buffer.writeBytes(response.body)
+        buffer.writeBytes(body)
         try await outbound.write(.body(.byteBuffer(buffer)))
         try await outbound.write(.end(nil))
     }
@@ -412,6 +699,57 @@ public enum PlumeServer {
             return (String(uri[uri.startIndex..<q]), String(uri[uri.index(after: q)...]))
         }
         return (uri, "")
+    }
+}
+
+/// A static file shrank between stat and send — the connection is failed rather than
+/// sending a short body under a longer Content-Length.
+struct StaticFileTruncated: Error {}
+
+/// zlib failed mid-stream — the connection is failed rather than emitting a body
+/// that no longer matches its declared Content-Encoding.
+struct StreamCompressionFailed: Error {}
+
+/// Closes a connection whose request BODY stalls: armed when a head arrives, reset
+/// by every body part, disarmed at `.end`. The complement of `SlowRequestHeadTimeout`
+/// (which guards the headers) — this one watches typed HTTP parts, so it can tell a
+/// stalled body from a connection that is merely idle between keep-alive requests
+/// or busy running the handler.
+final class RequestBodyIdleTimeout: ChannelInboundHandler {
+    typealias InboundIn = HTTPServerRequestPart
+    typealias InboundOut = HTTPServerRequestPart
+
+    private let timeout: TimeAmount
+    private var scheduled: Scheduled<Void>?
+
+    init(timeout: TimeAmount) { self.timeout = timeout }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        switch unwrapInboundIn(data) {
+        case .head:
+            arm(context)
+        case .body:
+            arm(context)   // progress — restart the clock
+        case .end:
+            scheduled?.cancel()
+            scheduled = nil
+        }
+        context.fireChannelRead(data)
+    }
+
+    private func arm(_ context: ChannelHandlerContext) {
+        scheduled?.cancel()
+        // Capture only the Channel (Sendable); timer and reads share this event loop,
+        // so a cancel always beats a concurrent fire (same shape as the head guard).
+        let channel = context.channel
+        scheduled = context.eventLoop.scheduleTask(in: timeout) {
+            channel.close(promise: nil)
+        }
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) {
+        scheduled?.cancel()
+        scheduled = nil
     }
 }
 

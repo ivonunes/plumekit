@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*.*.*"
+  # Dispatched at the tag ref by prepare-release.yml (a tag pushed with
+  # GITHUB_TOKEN can't trigger the push event above).
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -286,6 +289,9 @@ jobs:
       - editors
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -298,7 +304,38 @@ jobs:
           sha256sum *.tar.gz *.vsix *.zip > "plumekit-${GITHUB_REF_NAME}-SHA256SUMS"
           sha256sum -c "plumekit-${GITHUB_REF_NAME}-SHA256SUMS"
 
+      # The release description is the version's upgrade-notes page (with doc
+      # links rewritten to plumekit.dev), followed by GitHub's generated
+      # changelog. Every release has a page (an additive one rolls into an
+      # automatic all-clear); the --generate-notes fallback only covers a tag
+      # cut outside the prepare-release workflow.
+      - name: Compose release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PAGE="docs/upgrading/${VERSION}.md"
+          if [ -f "$PAGE" ]; then
+            {
+              echo "Upgrade guide: https://plumekit.dev/docs/upgrading/${VERSION}/"
+              echo
+              awk 'NR==1 && /^# /{next} {print}' "$PAGE" \
+                | sed -E 's|\(\.\./([A-Za-z0-9/_-]+)\.md(#[A-Za-z0-9_-]+)?\)|(https://plumekit.dev/docs/\1/\2)|g' \
+                | sed -E 's|\(([0-9]+\.[0-9]+\.[0-9]+)\.md\)|(https://plumekit.dev/docs/upgrading/\1/)|g' \
+                | sed -E 's|\(next\.md\)|(https://plumekit.dev/docs/upgrading/next/)|g'
+              echo
+              echo "---"
+              echo
+              gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body
+            } > release-notes.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Create release
-        run: gh release create "$GITHUB_REF_NAME" artifacts/*.tar.gz artifacts/*.vsix artifacts/*.zip artifacts/*-SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if [ -f release-notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" artifacts/*.tar.gz artifacts/*.vsix artifacts/*.zip artifacts/*-SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" artifacts/*.tar.gz artifacts/*.vsix artifacts/*.zip artifacts/*-SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}

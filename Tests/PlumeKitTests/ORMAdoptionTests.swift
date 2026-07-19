@@ -97,7 +97,7 @@ extension SerializedClockTests {
     // INSERT with a NULL nullable column.
     let a = AdoptedUser(name: "Ada")                // activeLabelId defaults to nil
     #expect(a.activeLabelId == nil)
-    try await a.save(in: db)
+    _ = try await a.save(in: db)
     #expect(a.id > 0)
     #expect(a.createdAt != nil && bytesEqual(a.createdAt!, "2023-11-14T22:13:20.000Z"))  // ISO auto-touch
     #expect(bytesEqual(a.updatedAt!, "2023-11-14T22:13:20.000Z"))
@@ -117,14 +117,14 @@ extension SerializedClockTests {
 
     // INSERT with a non-NULL nullable column.
     let b = AdoptedUser(name: "Grace", activeLabelId: 7)
-    try await b.save(in: db)
+    _ = try await b.save(in: db)
     let foundB = try await AdoptedUser.find(b.id, in: db)
     #expect(foundB!.activeLabelId == 7)
 
     // UPDATE: change one column; updated_at re-touches, created_at stays.
     ORMClock.now = { 1_700_000_002_500 }
     found!.activeLabelId = 99
-    try await found!.save(in: db)
+    _ = try await found!.save(in: db)
     let reloaded = try await AdoptedUser.find(a.id, in: db)
     #expect(reloaded!.activeLabelId == 99)
     #expect(bytesEqual(reloaded!.createdAt!, "2023-11-14T22:13:20.000Z"))          // unchanged
@@ -157,7 +157,7 @@ extension SerializedClockTests {
 
     // upsert writes the row at its TEXT key and auto-touches created_at.
     let t = ResetToken(email: "a@b.c", token: "tok-1")
-    try await t.upsert(in: db)
+    _ = try await t.upsert(in: db)
     // (No `.id`: a String-PK model doesn't declare one — it's keyed by `email`, above.)
     #expect(t.createdAt != nil && bytesEqual(t.createdAt!, "2023-11-14T22:13:20.000Z"))
     let raw = try await db.query("SELECT email, token FROM reset_tokens", [])
@@ -165,14 +165,14 @@ extension SerializedClockTests {
     if case .text(let e) = raw.rows[0][0] { #expect(bytesEqual(e, "a@b.c")) } else { Issue.record("email PK") }
 
     // Re-upsert the same email → ON CONFLICT(email) updates in place; still one row.
-    try await ResetToken(email: "a@b.c", token: "tok-2").upsert(in: db)
-    #expect(try await ResetToken.all().count(in: db) == 1)
+    _ = try await ResetToken(email: "a@b.c", token: "tok-2").upsert(in: db)
+    #expect(try await ResetToken.count(in: db) == 1)
 
     // Query + delete work off the string PK (delete is NOT a hardcoded integer id).
     let found = try await ResetToken.where(ResetToken.email == "a@b.c").first(in: db)
     #expect(found != nil && found!.token != nil && bytesEqual(found!.token!, "tok-2"))
     try await found!.delete(in: db)
-    #expect(try await ResetToken.all().count(in: db) == 0)
+    #expect(try await ResetToken.count(in: db) == 0)
 }
 }
 
@@ -188,7 +188,7 @@ extension SerializedClockTests {
     let saved = ORMClock.now; ORMClock.now = { 1_700_000_000_000 }; defer { ORMClock.now = saved }
 
     let a = CatalogItem(name: "Standard", priority: 10); a.id = 5
-    try await a.upsert(in: db)
+    _ = try await a.upsert(in: db)
     #expect(a.id == 5)
     let found = try await CatalogItem.find(5, in: db)
     #expect(found != nil && bytesEqual(found!.name, "Standard") && found!.priority == 10)
@@ -196,10 +196,10 @@ extension SerializedClockTests {
 
     // Re-upsert the same id with new data → updates in place; still exactly one row.
     let b = CatalogItem(name: "Standard+", priority: 12); b.id = 5
-    try await b.upsert(in: db)
+    _ = try await b.upsert(in: db)
     let reloaded = try await CatalogItem.find(5, in: db)
     #expect(bytesEqual(reloaded!.name, "Standard+") && reloaded!.priority == 12)
-    #expect(try await CatalogItem.all().count(in: db) == 1)
+    #expect(try await CatalogItem.count(in: db) == 1)
 }
 }
 
@@ -217,10 +217,10 @@ extension SerializedClockTests {
         """, [])
     _ = try await db.query("CREATE TABLE user_accounts (id INTEGER PRIMARY KEY, active_label_id INTEGER, created_at TEXT, updated_at TEXT, display_name TEXT NOT NULL)", [])
 
-    let me = AdoptedUser(name: "A"); try await me.save(in: db)
+    let me = AdoptedUser(name: "A"); _ = try await me.save(in: db)
 
     let f = AdoptedFollow(follower: me)   // follower set; following left unset → NULL
-    try await f.save(in: db)
+    _ = try await f.save(in: db)
 
     let raw = try await db.query("SELECT follower_id, following_id FROM account_follows WHERE id = ?", [sqlInt(f.id)])
     if case .integer(let fid) = raw.rows[0][0] { #expect(fid == Int64(me.id)) } else { Issue.record("follower_id should be set") }

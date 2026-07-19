@@ -22,31 +22,27 @@ func normalizeLocale(_ locale: String) -> String {
     return String(decoding: bytes, as: UTF8.self)
 }
 
-/// Byte-wise `<` for locale tags (no Unicode `String <`, which doesn't link in the guest).
-func asciiLess(_ a: String, _ b: String) -> Bool {
-    let x = Array(a.utf8), y = Array(b.utf8)
-    var i = 0
-    while i < x.count, i < y.count {
-        if x[i] != y[i] { return x[i] < y[i] }
-        i += 1
-    }
-    return x.count < y.count
-}
-
 public struct Translations: Sendable {
     public let defaultLocale: String
-    private let tables: [(locale: String, entries: [(key: String, value: String)])]
+    /// Entries are sorted by key bytes (see `lookup`); `json` is the locale's
+    /// script-safe JSON table, built once here instead of per response.
+    private let tables: [(locale: String, entries: [(key: String, value: String)], json: String)]
 
     public init(default defaultLocale: String, _ tables: [String: [String: String]]) {
         // Locale tags are case-insensitive (BCP 47); normalise to lowercase so an
         // `en-US.json` file matches a request's `en-US`. Sort by locale so `locales`
         // and the negotiation order are deterministic (the input is a Dictionary).
         self.defaultLocale = normalizeLocale(defaultLocale)
-        self.tables = tables
-            .map { locale, entries in
-                (locale: normalizeLocale(locale), entries: entries.map { ($0.key, $0.value) })
-            }
-            .sorted { asciiLess($0.locale, $1.locale) }
+        var built: [(locale: String, entries: [(key: String, value: String)], json: String)] = []
+        for (locale, entries) in tables {
+            var sorted: [(key: String, value: String)] = []
+            for entry in entries { sorted.append((key: entry.key, value: entry.value)) }
+            sorted.sort { asciiLess($0.key, $1.key) }
+            built.append((locale: normalizeLocale(locale), entries: sorted,
+                          json: Translations.serializeTable(sorted)))
+        }
+        built.sort { asciiLess($0.locale, $1.locale) }
+        self.tables = built
     }
 
     /// The languages this store has, for content negotiation.
@@ -55,14 +51,18 @@ public struct Translations: Sendable {
 
     /// A locale's strings as a JSON object, for injecting into a page so client-side
     /// `t()` (in `@script`) can look them up. `{}` when the locale has no strings.
+    /// Precomputed at init — responses just copy the string.
     public func jsonTable(for locale: String) -> String {
         let locale = normalizeLocale(locale)
+        for table in tables where utf8Equal(table.locale, locale) { return table.json }
+        return "{}"
+    }
+
+    /// Escapes `<` so a value containing "</script>" can't break out of the
+    /// injecting <script> tag (byte-wise, to stay embedded-clean).
+    private static func serializeTable(_ entries: [(key: String, value: String)]) -> String {
         var pairs: [(name: String, value: JSONValue)] = []
-        for table in tables where utf8Equal(table.locale, locale) {
-            for entry in table.entries { pairs.append((name: entry.key, value: .string(entry.value))) }
-        }
-        // Escape `<` so a value containing "</script>" can't break out of the
-        // injecting <script> tag (byte-wise, to stay embedded-clean).
+        for entry in entries { pairs.append((name: entry.key, value: .string(entry.value))) }
         var safe: [UInt8] = []
         for byte in JSONValue.object(pairs).serialize() {
             if byte == 0x3C { safe.append(contentsOf: Array("\\u003c".utf8)) } else { safe.append(byte) }
@@ -78,8 +78,17 @@ public struct Translations: Sendable {
     }
 
     private func lookup(_ key: String, in locale: String) -> String? {
+        // Binary search over the key-sorted entries — `t()` runs dozens of times per
+        // render against tables that can hold hundreds of keys.
         for table in tables where utf8Equal(table.locale, locale) {
-            for entry in table.entries where utf8Equal(entry.key, key) { return entry.value }
+            var low = 0
+            var high = table.entries.count
+            while low < high {
+                let mid = (low + high) / 2
+                let entry = table.entries[mid]
+                if utf8Equal(entry.key, key) { return entry.value }
+                if asciiLess(entry.key, key) { low = mid + 1 } else { high = mid }
+            }
         }
         return nil
     }

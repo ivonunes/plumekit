@@ -23,7 +23,9 @@ extension Controller {
     public func edit(_ request: Request) async throws -> Response { Self.unsupported() }
     public func update(_ request: Request) async throws -> Response { Self.unsupported() }
     public func destroy(_ request: Request) async throws -> Response { Self.unsupported() }
-    static func unsupported() -> Response { .text("405 Method Not Allowed", status: 405) }
+    // A bare status (empty body) so `app.errorPage(405)` applies here exactly as it
+    // does to router-generated 405s — a text body would bypass the error-page seam.
+    static func unsupported() -> Response { .status(405) }
 }
 
 extension Application {

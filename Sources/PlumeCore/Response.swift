@@ -6,11 +6,15 @@ public struct Response: Sendable {
     public var status: Int
     public var headers: Headers
     public var body: [UInt8]
+    /// A body produced incrementally instead of `body` — see `Response.stream`.
+    /// Adapters that can stream do; buffered transports collect it first.
+    public var bodyStream: (@Sendable (ResponseBodyWriter) async throws -> Void)?
 
     public init(status: Int = 200, headers: Headers = Headers(), body: [UInt8] = []) {
         self.status = status
         self.headers = headers
         self.body = body
+        self.bodyStream = nil
     }
 
     /// The body decoded as UTF-8 text (invalid sequences replaced).

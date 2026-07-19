@@ -160,10 +160,13 @@ public func plumekitHandle(
     _ reqLen: Int32
 ) -> UnsafeMutableRawPointer? {
     let n = reqLen > 0 ? Int(reqLen) : 0
-    var data = [UInt8](repeating: 0, count: n)
+    let data: [UInt8]
     if let reqPtr, n > 0 {
-        let src = reqPtr.assumingMemoryBound(to: UInt8.self)
-        for i in 0..<n { data[i] = src[i] }
+        // Bulk copy, not a per-element loop — this runs per invocation and scales
+        // with body size.
+        data = [UInt8](UnsafeRawBufferPointer(start: reqPtr, count: n))
+    } else {
+        data = []
     }
 
     let context = makeContext(ctx)
@@ -175,8 +178,9 @@ public func plumekitHandle(
     let out = box.bytes
     let respLen = out.count
     let respBuf = UnsafeMutableRawPointer.allocate(byteCount: respLen > 0 ? respLen : 1, alignment: 1)
-    let rb = respBuf.assumingMemoryBound(to: UInt8.self)
-    for i in 0..<respLen { rb[i] = out[i] }
+    out.withUnsafeBytes { source in
+        if respLen > 0 { respBuf.copyMemory(from: source.baseAddress!, byteCount: respLen) }
+    }
 
     let desc = UnsafeMutableRawPointer.allocate(byteCount: 8, alignment: 4)
     desc.storeBytes(of: UInt32(truncatingIfNeeded: UInt(bitPattern: respBuf)), toByteOffset: 0, as: UInt32.self)
@@ -195,10 +199,11 @@ public func plumekitQueue(
     _ msgLen: Int32
 ) {
     let n = msgLen > 0 ? Int(msgLen) : 0
-    var data = [UInt8](repeating: 0, count: n)
+    let data: [UInt8]
     if let msgPtr, n > 0 {
-        let src = msgPtr.assumingMemoryBound(to: UInt8.self)
-        for i in 0..<n { data[i] = src[i] }
+        data = [UInt8](UnsafeRawBufferPointer(start: msgPtr, count: n))
+    } else {
+        data = []
     }
 
     let context = makeContext(ctx)

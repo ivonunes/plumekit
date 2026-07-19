@@ -47,7 +47,7 @@ struct NoteSyncStore: SyncStore {
         return recordRow(row)
     }
     func ownerOfUID(_ uid: String) async throws -> String? {
-        let r = try await db.query("SELECT ownerID FROM notes WHERE uid = ?", [.text(uid)])
+        let r = try await db.query("SELECT owner_id FROM notes WHERE uid = ?", [.text(uid)])
         guard let row = r.rows.first, case .text(let o) = row[0] else { return nil }
         return o
     }
@@ -62,7 +62,7 @@ struct NoteSyncStore: SyncStore {
         let del: SQLValue = .integer(deleted ? 1 : 0)
         if exists.rows.isEmpty {
             _ = try await db.query(
-                "INSERT INTO notes (uid, version, deleted, ownerID, body) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO notes (uid, version, deleted, owner_id, body) VALUES (?, ?, ?, ?, ?)",
                 [.text(uid), .integer(version), del, .text(owner), .text(body)])
         } else if deleted {
             _ = try await db.query("UPDATE notes SET version = ?, deleted = ? WHERE uid = ?",
@@ -74,7 +74,7 @@ struct NoteSyncStore: SyncStore {
     }
     func changes(since: Int64, owner: String) async throws -> [SyncRecord] {
         let r = try await db.query(
-            "SELECT uid, version, deleted, body FROM notes WHERE ownerID = ? AND version > ? ORDER BY version",
+            "SELECT uid, version, deleted, body FROM notes WHERE owner_id = ? AND version > ? ORDER BY version",
             [.text(owner), .integer(since)])
         return r.rows.map { recordRow($0) }
     }

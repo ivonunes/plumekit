@@ -168,6 +168,15 @@ public struct Database: Sendable {
         return try await _batch(statements)
     }
 
+    /// Whether `transaction` is available: true for the native drivers, false on
+    /// Cloudflare D1 (each statement is atomic on its own; grouped writes go
+    /// through `batch`). Callers that can run either way (the Migrator) branch on
+    /// this instead of trapping.
+    public var supportsInteractiveTransactions: Bool {
+        if case .none = _transaction { return false }
+        return true
+    }
+
     /// Run `body` atomically: its writes commit together, and a thrown error rolls
     /// every one of them back (then rethrows). Queries on `tx` — and, on native
     /// servers, ambient ORM calls made inside the body — run inside the transaction;

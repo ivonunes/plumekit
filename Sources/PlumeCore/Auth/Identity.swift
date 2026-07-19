@@ -48,6 +48,46 @@ public func identityMiddleware(_ manager: SessionManager, cookieName: String = S
     }
 }
 
+/// The installable form: builds the `SessionManager` from the REQUEST's bindings
+/// (the signing secret named `secretName` via the secrets provider, sessions in
+/// KV), mirroring `csrfProtection(secretName:)` — so `buildApp()` can wire it with
+/// no per-request plumbing:
+///
+///     app.use(identityMiddleware())
+///
+/// Requests pass through unauthenticated when the secret or KV isn't configured
+/// (identity resolution is optional; guarded routes still 401/redirect).
+public func identityMiddleware(secretName: String = "AUTH_SECRET",
+                               cookieName: String = SessionCookie.name) -> MiddlewareFunction {
+    { request, next in
+        var req = request
+        if let token = extractBearerToken(request) ?? extractCookie(request, name: cookieName),
+           let kv = request.context.kv {
+            // A secrets-backend FAILURE (not merely an unconfigured secret) must be
+            // visible — it logs everyone out for the duration, and a silent nil here
+            // would read as a session bug.
+            var key: [UInt8]? = nil
+            do {
+                key = try await request.context.secrets?.secret(secretName)
+            } catch {
+                // (`any Error` can't be stringified under Embedded — the guest logs
+                // without the underlying reason.)
+                #if hasFeature(Embedded)
+                request.context.log("identityMiddleware: reading \(secretName) failed — treating the request as unauthenticated")
+                #else
+                request.context.log("identityMiddleware: reading \(secretName) failed: \(error) — treating the request as unauthenticated")
+                #endif
+            }
+            if let key, !key.isEmpty {
+                let manager = SessionManager(key: key, store: KVSessionStore(kv),
+                                             now: { Int(PlatformClock.now() / 1000) })
+                req.principal = await manager.resolve(token)
+            }
+        }
+        return try await next(req)
+    }
+}
+
 extension Request {
     /// The authenticated user id, or nil. Resolves identically from cookie or token.
     public var currentUser: String? { principal?.subject }

@@ -47,6 +47,10 @@ public struct BelongsTo<Related: Model>: @unchecked Sendable {
     /// captured at assignment).
     public var resolvedKey: SQLValue { cached?.primaryKeyValue ?? key }
 
+    /// Whether the relation has been loaded (or assigned). An unloaded read of
+    /// `wrappedValue` is nil — check this to tell "not loaded" from "no parent".
+    public var isLoaded: Bool { if case .some = cached { return true }; return false }
+
     /// The related object if already loaded/assigned, else nil. Never auto-loads.
     public var wrappedValue: Related? {
         get { cached }
@@ -87,6 +91,11 @@ public struct HasMany<Child: Model>: @unchecked Sendable {
     /// than trapping on the 32-bit guest for a large `Int64` owner key (matches `BelongsTo.id`).
     public var ownerID: Int { if case .integer(let n) = ownerKey { return Int(truncatingIfNeeded: n) }; return 0 }
 
+    /// Whether the children have been loaded. An unloaded read of `wrappedValue`
+    /// is `[]` — indistinguishable from "no children" — so check this (or use
+    /// `load`/a preload helper) when the difference matters.
+    public var isLoaded: Bool { if case .some = cached { return true }; return false }
+
     /// Loaded children, or empty if not loaded. Never auto-loads.
     public var wrappedValue: [Child] { cached ?? [] }
 
@@ -102,65 +111,91 @@ public struct HasMany<Child: Model>: @unchecked Sendable {
     }
 }
 
-// MARK: - IN predicate (for batched eager loading)
-
-extension Column where Value == Int {
-    /// `col IN (?, ?, …)` — bound values, never interpolated.
-    public func `in`(_ ids: [Int]) -> Predicate<Root> {
-        if ids.isEmpty { return Predicate(sql: "0 = 1", bindings: []) }
-        var sql = name + " IN ("
-        var bindings: [SQLValue] = []
-        var i = 0
-        while i < ids.count {
-            if i > 0 { sql += ", " }
-            sql += "?"
-            bindings.append(sqlInt(ids[i]))
-            i += 1
-        }
-        sql += ")"
-        return Predicate(sql: sql, bindings: bindings)
-    }
-}
-
 // MARK: - Batched eager loading (no N+1, keypath-free)
 
+#if !hasFeature(Embedded)
+/// `eagerLoad` was pointed at a foreign-key column the child model doesn't have
+/// (a typo, or an owner/child FK-name mismatch).
+public enum EagerLoadError: Error, CustomStringConvertible {
+    case unknownForeignKey(table: String, column: String)
+    public var description: String {
+        switch self {
+        case .unknownForeignKey(let table, let column):
+            return "eagerLoad: \(table) has no column named \(column)"
+        }
+    }
+}
+#endif
+
 /// Load a has-many relation for many owners in ONE child query, then group and
-/// assign. Closures stand in for the (embedded-forbidden) keypaths: `childKey`
-/// reads a child's FK, `assign` stores the grouped children on each owner.
+/// assign. The child's FK value is read from its decoded row via the schema (no
+/// closure needed); `assign` stands in for the (embedded-forbidden) keypath and
+/// stores the grouped children on each owner. Prefer the typed helper @Model
+/// generates per relation (`Post.preloadComments(posts)`) — it supplies the FK
+/// name so a typo can't reach this.
 ///
 /// Total queries = 1 (plus however the owners were fetched) — never N+1.
+/// Grouping is one pass over the children (a map keyed by normalised FK bytes),
+/// not owners × children.
 public func eagerLoad<Owner: Model, Child: Model>(
     _ owners: [Owner],
     foreignKey: String,
-    childKey: (Child) -> SQLValue,
     assign: (Owner, [Child]) -> Void,
-    in db: Database
+    in db: Database? = nil
 ) async throws {
+    let db = resolvedDatabase(db)
     if owners.isEmpty { return }
+    var fkIndex = -1
+    for (index, column) in Child.schema.columns.enumerated() where utf8Equal(column.name, foreignKey) {
+        fkIndex = index
+        break
+    }
+    guard fkIndex >= 0 else {
+        // A misspelled FK is a programming error, but natively it must surface as a
+        // catchable per-request error (a 500), not take down the whole server with
+        // every in-flight request. The guest can't throw a helpful `any Error`, so
+        // it traps there (single-request instances — nothing else is lost).
+        #if hasFeature(Embedded)
+        fatalError("eagerLoad: unknown foreign key column")
+        #else
+        throw EagerLoadError.unknownForeignKey(table: Child.schema.table, column: foreignKey)
+        #endif
+    }
     let keys = owners.map { $0.primaryKeyValue }             // any PK type
     var placeholders = ""
     for i in keys.indices { placeholders += i == 0 ? "?" : ", ?" }
     let children = try await Child.where(
         Predicate(sql: foreignKey + " IN (" + placeholders + ")", bindings: keys)).all(in: db)
+
+    var grouped: [[UInt8]: [Child]] = [:]
+    for child in children {
+        grouped[normalizedKeyBytes(child.columnValues()[fkIndex]), default: []].append(child)
+    }
     for owner in owners {
-        let ownerKey = owner.primaryKeyValue
-        var mine: [Child] = []
-        for child in children where sqlKeyEqual(childKey(child), ownerKey) { mine.append(child) }
-        assign(owner, mine)
+        assign(owner, grouped[normalizedKeyBytes(owner.primaryKeyValue)] ?? [])
     }
 }
 
-/// Key equality for grouping. Tolerates an integer/real tag mismatch (a backend may
-/// return a numeric FK as `.double` while the owner re-encodes it as `.integer`) so
-/// children don't silently fail to group; otherwise exact `SQLValue` equality.
-private func sqlKeyEqual(_ a: SQLValue, _ b: SQLValue) -> Bool {
-    switch (a, b) {
-    case (.integer(let x), .integer(let y)): return x == y
-    case (.integer(let x), .double(let y)), (.double(let y), .integer(let x)): return Double(x) == y
-    case (.double(let x), .double(let y)): return x == y
-    case (.text(let x), .text(let y)): return Array(x.utf8) == Array(y.utf8)   // byte-wise: String == doesn't link in the guest
-    case (.blob(let x), .blob(let y)): return x == y
-    case (.null, .null): return true
-    default: return false
+/// A `SQLValue` as grouping-key bytes. An integral `.double` folds onto `.integer`
+/// (a backend may return a numeric FK as a real while the owner re-encodes it as an
+/// integer), so children can't silently fail to group. Byte-wise — no `String ==`.
+private func normalizedKeyBytes(_ value: SQLValue) -> [UInt8] {
+    func integerBytes(_ n: Int64) -> [UInt8] {
+        var out: [UInt8] = [1]
+        var u = UInt64(bitPattern: n)
+        for _ in 0..<8 { out.append(UInt8(truncatingIfNeeded: u)); u >>= 8 }
+        return out
+    }
+    switch value {
+    case .integer(let n): return integerBytes(n)
+    case .double(let d):
+        if let n = Int64(exactly: d) { return integerBytes(n) }
+        var out: [UInt8] = [2]
+        var u = d.bitPattern
+        for _ in 0..<8 { out.append(UInt8(truncatingIfNeeded: u)); u >>= 8 }
+        return out
+    case .text(let s): return [3] + Array(s.utf8)
+    case .blob(let b): return [4] + b
+    case .null: return [5]
     }
 }

@@ -48,14 +48,14 @@ final class CountingDB: SQLDatabase, @unchecked Sendable {
     try await Article.createTable(in: db)
 
     let author = Author(name: "Ada")
-    try await author.save(in: db)
+    _ = try await author.save(in: db)
     #expect(author.id > 0)
 
-    try await Article(title: "one", author: author).save(in: db)
-    try await Article(title: "two", author: author).save(in: db)
+    _ = try await Article(title: "one", author: author).save(in: db)
+    _ = try await Article(title: "two", author: author).save(in: db)
 
     // BelongsTo: load the parent from a freshly-found child (only the FK is set).
-    let articles = try await Article.all().all(in: db)
+    let articles = try await Article.all(in: db)
     let parent = try await articles[0].$author.load(in: db)
     #expect(parent != nil)
     #expect(eq(parent!.name, "Ada"))
@@ -71,26 +71,32 @@ final class CountingDB: SQLDatabase, @unchecked Sendable {
     try await Author.createTable(in: db)
     try await Article.createTable(in: db)
 
-    let a = Author(name: "A"); try await a.save(in: db)
-    let b = Author(name: "B"); try await b.save(in: db)
-    try await Article(title: "1", author: a).save(in: db)
-    try await Article(title: "2", author: a).save(in: db)
-    try await Article(title: "3", author: b).save(in: db)
+    let a = Author(name: "A"); _ = try await a.save(in: db)
+    let b = Author(name: "B"); _ = try await b.save(in: db)
+    _ = try await Article(title: "1", author: a).save(in: db)
+    _ = try await Article(title: "2", author: a).save(in: db)
+    _ = try await Article(title: "3", author: b).save(in: db)
 
-    let authors = try await Author.all().all(in: db)
+    let authors = try await Author.all(in: db)
     #expect(authors.count == 2)
 
+    // The typed helper @Model generates per has-many: FK name + assignment supplied.
     let before = counting.count
-    try await eagerLoad(authors, foreignKey: "author_id",
-        childKey: { (c: Article) in c.$author.key },
-        assign: { (owner: Author, kids: [Article]) in owner.$articles.cached = kids },
-        in: db)
+    try await Author.preloadArticles(authors, in: db)
     let queriesIssued = counting.count - before
     #expect(queriesIssued == 1)   // ONE child query for ALL authors — not N+1
 
+    #expect(authors.allSatisfy { $0.$articles.isLoaded })
     var total = 0
     for author in authors { total += author.$articles.cached?.count ?? -100 }
     #expect(total == 3)           // grouped correctly: A→2, B→1
+
+    // The raw seam still works (same one-query grouping) for hand-written stores.
+    let rawBefore = counting.count
+    try await eagerLoad(authors, foreignKey: "author_id",
+        assign: { (owner: Author, kids: [Article]) in owner.$articles.cached = kids },
+        in: db)
+    #expect(counting.count - rawBefore == 1)
 }
 
 // A UUID-primary-key parent with relations (previously a compile error / silent
@@ -122,13 +128,13 @@ final class Project: Model {
     try await Project.createTable(in: db)
 
     let ws = Workspace(name: "Acme")
-    try await ws.save(in: db)
+    _ = try await ws.save(in: db)
 
-    try await Project(title: "alpha", workspace: ws).save(in: db)
-    try await Project(title: "beta", workspace: ws).save(in: db)
+    _ = try await Project(title: "alpha", workspace: ws).save(in: db)
+    _ = try await Project(title: "beta", workspace: ws).save(in: db)
 
     // BelongsTo across a UUID key: load the parent from a freshly-found child.
-    let projects = try await Project.all().all(in: db)
+    let projects = try await Project.all(in: db)
     let parent = try await projects[0].$workspace.load(in: db)
     #expect(parent != nil)
     #expect(eq(parent!.name, "Acme"))
@@ -155,9 +161,9 @@ final class Project: Model {
     try await Team.createTable(in: db)
     try await Member.createTable(in: db)
     let team = Team(name: "Alpha")
-    try await team.save(in: db)
-    try await Member(handle: "a", team: team).save(in: db)
-    try await Member(handle: "b", team: team).save(in: db)
+    _ = try await team.save(in: db)
+    _ = try await Member(handle: "a", team: team).save(in: db)
+    _ = try await Member(handle: "b", team: team).save(in: db)
     let members = try await team.$members.load(in: db)   // WHERE squad_id = ?, not team_id
     #expect(members.count == 2)
 }
@@ -168,9 +174,9 @@ final class Project: Model {
     try await Article.createTable(in: db)
     let author = Author(name: "Late")
     let article = Article(title: "x", author: author)   // author.id is still 0 at assignment
-    try await author.save(in: db)                        // id assigned only now
-    try await article.save(in: db)                       // must persist the real FK, not 0
-    let parent = try await (try await Article.all().all(in: db))[0].$author.load(in: db)
+    _ = try await author.save(in: db)                        // id assigned only now
+    _ = try await article.save(in: db)                       // must persist the real FK, not 0
+    let parent = try await (try await Article.all(in: db))[0].$author.load(in: db)
     #expect(parent != nil && eq(parent!.name, "Late"))
 }
 
@@ -179,12 +185,12 @@ final class Project: Model {
     try await Author.createTable(in: db)
     try await Article.createTable(in: db)
     let author = Author(name: "X")
-    try await author.save(in: db)
+    _ = try await author.save(in: db)
     let article = Article(title: "t", author: author)
-    try await article.save(in: db)
+    _ = try await article.save(in: db)
     #expect(article.$author.id == author.id)     // FK set
     article.author = nil                          // must clear the FK, not leave it stale
-    try await article.save(in: db)
+    _ = try await article.save(in: db)
     let reloaded = try #require(await Article.find(article.id, in: db))
     #expect(reloaded.$author.id == 0)             // persisted as NULL
 }
@@ -193,7 +199,7 @@ final class Project: Model {
     let db = try NativeDrivers.sqlite(path: ":memory:")
     try await Workspace.createTable(in: db)
     let ws = Workspace(name: "Acme")
-    try await ws.save(in: db)
+    _ = try await ws.save(in: db)
     let h = Headers()
     var req = Request(method: .get, path: "/", headers: h)
     req.parameters.set("id", ws.id.uuidString.uppercased())   // upper-case segment must still match

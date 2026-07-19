@@ -87,7 +87,7 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
 
     let post = Post(title: "Hi", body: "world", published: false)
     #expect(post.id == 0)
-    try await post.save(in: db)             // INSERT
+    _ = try await post.save(in: db)             // INSERT
     #expect(post.id > 0)                     // id populated from lastInsertID
 
     let found = try await Post.find(post.id, in: db)
@@ -99,8 +99,8 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     // Dirty UPDATE — flip only `published`; `title`/`body` untouched.
     found!.published = true
     #expect(found!.changedColumnIndices() == [3])
-    try await found!.save(in: db)
-    try await found!.save(in: db)            // second save: no changes → no-op
+    _ = try await found!.save(in: db)
+    _ = try await found!.save(in: db)            // second save: no changes → no-op
     let reloaded = try await Post.find(post.id, in: db)
     #expect(reloaded!.published == true)
     #expect(bytesEqual(reloaded!.title, "Hi"))
@@ -114,8 +114,8 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     try await Post.createTable(in: db)
     let a = Post(title: "a", body: "", published: false)
     let b = Post(title: "b", body: "", published: false)
-    try await a.save(in: db)
-    try await b.save(in: db)
+    _ = try await a.save(in: db)
+    _ = try await b.save(in: db)
     #expect(a.id > 0 && b.id > 0 && a.id != b.id)
 }
 
@@ -124,7 +124,7 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     let db = try NativeDrivers.sqlite(path: ":memory:")
     try await Post.createTable(in: db)
     for (title, pub) in [("a", true), ("b", false), ("c", true), ("d", true)] {
-        try await Post(title: title, body: "", published: pub).save(in: db)
+        _ = try await Post(title: title, body: "", published: pub).save(in: db)
     }
 
     let published = try await Post.where(Post.published == true).all(in: db)
@@ -146,7 +146,7 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     // equality on text + all()
     let byTitle = try await Post.where(Post.title == "a").all(in: db)
     #expect(byTitle.count == 1)
-    #expect(try await Post.all().count(in: db) == 4)
+    #expect(try await Post.count(in: db) == 4)
 }
 
 @Test func uuidPrimaryKeyCreateFindUpdateDeleteSQLite() async throws {
@@ -156,7 +156,7 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     let token = APIAccessToken(label: "primary")
     #expect(token.id != .zero)
     #expect(token.isPersisted == false)
-    try await token.save(in: db)
+    _ = try await token.save(in: db)
     #expect(token.isPersisted)
 
     let raw = try await db.query("SELECT id FROM api_access_tokens WHERE id = ?", [sqlUUID(token.id)])
@@ -173,7 +173,7 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     #expect(bytesEqual(found!.label, "primary"))
 
     found!.label = "rotated"
-    try await found!.save(in: db)
+    _ = try await found!.save(in: db)
     let reloaded = try await APIAccessToken.find(token.id, in: db)
     #expect(reloaded != nil && bytesEqual(reloaded!.label, "rotated"))
 
@@ -193,4 +193,46 @@ private func bytesEqual(_ a: String, _ b: String) -> Bool { Array(a.utf8) == Arr
     #expect(made.id == 0)                 // no id in JSON → insert-ready
     #expect(bytesEqual(made.title, "New"))
     #expect(made.published == false)
+}
+
+@Test func withinPredicateMatchesTheGivenSet() async throws {
+    let db = try NativeDrivers.sqlite(path: ":memory:")
+    try await Post.createTable(in: db)
+    var ids: [Int] = []
+    for index in 1...4 {
+        let post = Post(title: "P\(index)", body: "", published: index % 2 == 0)
+        _ = try await post.save(in: db)
+        ids.append(post.id)
+    }
+
+    let picked = try await Post.where(Post.id.within([ids[0], ids[2]]))
+        .order(by: Post.id).all(in: db)
+    #expect(picked.map { $0.id } == [ids[0], ids[2]])
+
+    // Composes with other predicates.
+    let published = try await Post.where(Post.id.within(ids) && Post.published == true).all(in: db)
+    #expect(published.count == 2)
+
+    // An empty list matches nothing (and stays valid SQL).
+    #expect(try await Post.where(Post.id.within([])).all(in: db).isEmpty)
+
+    // Strings work too.
+    let byTitle = try await Post.where(Post.title.within(["P1", "P4"])).all(in: db)
+    #expect(byTitle.count == 2)
+}
+
+@Test func existsAndPluckQueries() async throws {
+    let db = try NativeDrivers.sqlite(path: ":memory:")
+    try await Post.createTable(in: db)
+    for index in 1...3 {
+        _ = try await Post(title: "P\(index)", body: "", published: index == 2).save(in: db)
+    }
+
+    #expect(try await Post.where(Post.published == true).exists(in: db))
+    #expect(!(try await Post.where(Post.title == "missing").exists(in: db)))
+
+    let ids = try await Post.where(Post.published == false).order(by: Post.id)
+        .pluckInts(Post.id, in: db)
+    #expect(ids.count == 2)
+    #expect(ids == ids.sorted())
 }

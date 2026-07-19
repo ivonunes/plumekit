@@ -44,7 +44,7 @@ a payload without `id` is insert-ready).
 
 ```swift
 func index(_ request: Request) async throws -> Response {
-    let posts = try await Post.all().all(in: request.bindings.database)
+    let posts = try await Post.all(in: request.bindings.database)
     if request.wantsJSON { return .json(jsonArray(posts)) }   // Accept: application/json
     return .text(/* … */)                                     // else HTML/text
 }

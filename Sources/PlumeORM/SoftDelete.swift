@@ -14,7 +14,7 @@ import PlumeCore
 //     try await post.softDelete()              // hide (sets deletedAt, keeps the row)
 //     try await post.restore()                 // bring it back
 //     try await post.forceDelete()             // actually DELETE the row
-//     try await Post.all().all()               // live rows only
+//     try await Post.all()                     // live rows only
 //     try await Post.withTrashed().all()       // everything
 //     try await Post.onlyTrashed().all()       // just the hidden ones
 
@@ -38,15 +38,17 @@ extension SoftDeletable {
     /// Hide the row: stamps `deletedAt` and saves. The row stays in the table.
     /// (`max(1, …)` keeps the deleted *flag* correct even where no wall clock is
     /// installed — the timestamp is informative, the non-zero marker is semantic.)
+    /// Skips validations (like Rails on destroy): a legacy row that predates a
+    /// newer rule must still be deletable.
     public func softDelete(in db: Database? = nil) async throws {
         deletedAt = max(1, Int(ORMClock.now() / 1000))
-        _ = try await save(in: db)
+        try await persistWithoutValidation(in: resolvedDatabase(db))
     }
 
-    /// Un-hide a soft-deleted row.
+    /// Un-hide a soft-deleted row. Skips validations, mirroring `softDelete`.
     public func restore(in db: Database? = nil) async throws {
         deletedAt = 0
-        _ = try await save(in: db)
+        try await persistWithoutValidation(in: resolvedDatabase(db))
     }
 
     /// Really DELETE the row (what `delete()` does for any model).

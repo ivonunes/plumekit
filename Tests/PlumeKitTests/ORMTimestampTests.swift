@@ -31,13 +31,13 @@ extension SerializedClockTests {
 
     let event = Event(name: "x")
     #expect(event.createdAt == 0)            // not yet saved
-    try await event.save(in: db)             // INSERT
+    _ = try await event.save(in: db)             // INSERT
     #expect(event.createdAt == 1000)
     #expect(event.updatedAt == 1000)
 
     ORMClock.now = { 2000 }
     event.name = "y"
-    try await event.save(in: db)             // UPDATE bumps updatedAt only
+    _ = try await event.save(in: db)             // UPDATE bumps updatedAt only
     let reloaded = try await Event.find(event.id, in: db)
     #expect(reloaded?.createdAt == 1000)     // stable
     #expect(reloaded?.updatedAt == 2000)     // bumped

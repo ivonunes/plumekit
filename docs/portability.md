@@ -70,8 +70,11 @@ Scaffolded apps have a `Public/` directory. Your app references an asset by the
 - **Native** (`plumekit serve`): the server serves any file under `Public/` at its
   URL path (`Public/images/logo.png` →
   `/images/logo.png`). It is path-traversal-safe, sets `Content-Type` by file
-  extension and sends a `Cache-Control` header. Static files take priority for GET;
-  a miss falls through to your routes.
+  extension, sends `Cache-Control` plus `ETag`/`Last-Modified` validators (repeat
+  visits get 304s), streams large files in chunks, and gzips text-ish content for
+  clients that accept it — HTML, CSS, JS and JSON responses from your routes are
+  compressed the same way. Static files take priority for GET; a miss falls
+  through to your routes.
 - **Cloudflare**: `plumekit build --target cloudflare` copies `Public/` →
   `dist/cloudflare/public`, and the generated `wrangler.toml` gets an `[assets]`
   block (`directory = "./public"`). Cloudflare serves a matching path directly;

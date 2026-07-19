@@ -5,19 +5,24 @@ import Foundation
 // then builds + deploys). GitHub and Forgejo share the Actions YAML — Forgejo Actions
 // is GitHub-compatible — differing only in the workflows directory.
 enum CITemplates {
-    /// The files to write for a provider + the project's default build target.
-    static func files(provider: String, target: String) -> [(path: String, contents: String)]? {
+    /// The files to write for a provider + the project's default build target and
+    /// capabilities. `database` matters to the test job: the Lambda target links the
+    /// Postgres driver whenever it's enabled (whatever the native driver), and
+    /// `swift test` builds all targets, so the job needs libpq-dev.
+    static func files(provider: String, target: String,
+                      capabilities: Set<String> = []) -> [(path: String, contents: String)]? {
+        let needsPostgres = capabilities.contains("database")
         switch provider {
         case "github":
-            return [(".github/workflows/test.yml", actionsTest),
+            return [(".github/workflows/test.yml", actionsTest(needsPostgres: needsPostgres)),
                     (".github/workflows/deploy.yml", actionsDeploy(target: target)),
                     (".github/dependabot.yml", dependabot)]
         case "forgejo":
-            return [(".forgejo/workflows/test.yml", actionsTest),
+            return [(".forgejo/workflows/test.yml", actionsTest(needsPostgres: needsPostgres)),
                     (".forgejo/workflows/deploy.yml", actionsDeploy(target: target)),
                     ("renovate.json", renovate)]
         case "gitlab":
-            return [(".gitlab-ci.yml", gitlab(target: target)),
+            return [(".gitlab-ci.yml", gitlab(target: target, needsPostgres: needsPostgres)),
                     ("renovate.json", renovate)]
         default:
             return nil
@@ -58,26 +63,32 @@ enum CITemplates {
 
     // MARK: GitHub / Forgejo Actions (shared syntax)
 
-    private static let actionsTest = """
-    name: Test
-    on:
-      pull_request:
-        branches: [main]
-    jobs:
-      test:
-        runs-on: ubuntu-latest
-        container:
-          image: \(swiftImage)
-        steps:
-          - uses: actions/checkout@v7
-          - uses: actions/cache@v6
-            with:
-              path: .build
-              key: swiftpm-test-${{ hashFiles('Package.resolved') }}
-              restore-keys: swiftpm-test-
-          # Using the Postgres driver? apt-get install -y libpq-dev first.
-          - run: swift test
-    """
+    private static func actionsTest(needsPostgres: Bool) -> String {
+        // With `database` on, `swift test` builds the Lambda target, which links the
+        // Postgres driver — so libpq headers are required even for SQLite-native apps.
+        let postgresStep = needsPostgres
+            ? "      - run: apt-get update && apt-get install -y libpq-dev\n"
+            : "      # Using the Postgres driver? apt-get install -y libpq-dev first.\n"
+        return """
+        name: Test
+        on:
+          pull_request:
+            branches: [main]
+        jobs:
+          test:
+            runs-on: ubuntu-latest
+            container:
+              image: \(swiftImage)
+            steps:
+              - uses: actions/checkout@v7
+              - uses: actions/cache@v6
+                with:
+                  path: .build
+                  key: swiftpm-test-${{ hashFiles('Package.resolved') }}
+                  restore-keys: swiftpm-test-
+        \(postgresStep)      - run: swift test
+        """
+    }
 
     private static func actionsDeploy(target: String) -> String {
         """
@@ -107,8 +118,11 @@ enum CITemplates {
 
     // MARK: GitLab CI
 
-    private static func gitlab(target: String) -> String {
-        """
+    private static func gitlab(target: String, needsPostgres: Bool) -> String {
+        let testScript = needsPostgres
+            ? "  script:\n    - apt-get update && apt-get install -y libpq-dev\n    - swift test"
+            : "  # Using the Postgres driver? apt-get install -y libpq-dev first.\n  script:\n    - swift test"
+        return """
         stages: [test, deploy]
 
         test:
@@ -121,9 +135,7 @@ enum CITemplates {
               files: [Package.resolved]
               prefix: swiftpm-test
             paths: [.build]
-          # Using the Postgres driver? apt-get install -y libpq-dev first.
-          script:
-            - swift test
+        \(testScript)
 
         deploy:
           stage: deploy

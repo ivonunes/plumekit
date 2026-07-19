@@ -4,6 +4,9 @@ import PlumeCore
 // generated `[SQLValue]` resolves here).
 public typealias SQLValue = PlumeCore.SQLValue
 public typealias UUID = PlumeCore.UUID
+/// Aliased so macro-generated members (the `preload<Relation>` helpers) can name
+/// the type in a model file that imports only PlumeORM.
+public typealias Database = PlumeCore.Database
 
 // SQLValue constructors. The @Model encoder emits calls to these instead of
 // naming `PlumeKit`'s enum cases directly: under Embedded Swift an enum case may

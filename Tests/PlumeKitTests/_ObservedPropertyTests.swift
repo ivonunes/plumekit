@@ -14,7 +14,7 @@ final class ObservedModel: Model {
     let db = try NativeDrivers.sqlite(path: ":memory:")
     try await ObservedModel.createTable(in: db)
     let m = ObservedModel(views: 7, name: "x")
-    try await m.save(in: db)
+    _ = try await m.save(in: db)
     let loaded = try #require(await ObservedModel.find(m.id, in: db))
     #expect(loaded.views == 7 && loaded.name == "x")   // column persists + round-trips
 }

@@ -211,6 +211,47 @@ response.headers.set("location", "/posts/42")
 return response
 ```
 
+### Streaming bodies
+
+A response can produce its body incrementally instead of buffering it, for
+exports and generated downloads of unknown size:
+
+```swift
+app.get("/posts.csv") { _ in
+    .stream(contentType: "text/csv") { writer in
+        try await writer.write("id,title\n")
+        for post in try await Post.all() {
+            try await writer.write("\(post.id),\(post.title)\n")
+        }
+    }
+}
+```
+
+The native server sends each written chunk to the client as it comes (chunked
+transfer encoding). On Cloudflare and Lambda, whose response is a single payload,
+the producer runs to completion and the result is sent whole; the handler code is
+identical.
+
+The other direction is per route: `body: .streaming` delivers the request body in
+chunks through `request.bodyReader` instead of buffering it, so a large upload
+never sits in memory (and the native server's 32 MB buffered-body cap doesn't
+apply):
+
+```swift
+app.post("/import", body: .streaming) { request in
+    var total = 0
+    while let chunk = try await request.bodyReader?.next() {
+        total += chunk.count   // process incrementally: write to storage, parse, hash…
+    }
+    return .text("received \(total) bytes")
+}
+```
+
+On a streaming route `request.body` is empty, so `request.form` (and the CSRF
+form field) see nothing: authenticate these endpoints with a bearer token or send
+the CSRF token as a header. On buffered targets the handler receives the body as
+one replayed chunk.
+
 ### Flash messages
 
 A flash is a one-time notice carried across a redirect: "Post created" on the page

@@ -55,12 +55,21 @@ extension Model {
     /// invalid, or [] on success. Validation failure is a returned value, not a
     /// thrown error — embedded Swift forbids `catch as`/`any Error` dynamic casts,
     /// so this keeps the same code working natively and in the wasm worker. (Real
-    /// DB errors still `throw` and propagate.)
-    @discardableResult
+    /// DB errors still `throw` and propagate.) The result is deliberately NOT
+    /// discardable: ignoring it would silently persist nothing on an invalid model,
+    /// the value-returning equivalent of swallowing a thrown error.
     public func save(in db: Database? = nil) async throws -> [ValidationError] {
         let db = resolvedDatabase(db)
         let errors = try await validate(in: db)
         if !errors.isEmpty { return errors }
+        try await persistWithoutValidation(in: db)
+        return []
+    }
+
+    /// The write path shared by `save()` and operations that must not be blocked by
+    /// validations (soft delete/restore, which only flip a marker column — Rails
+    /// likewise skips validations on destroy). Callbacks and timestamps still run.
+    func persistWithoutValidation(in db: Database) async throws {
         try await willSave()
         let creating = !isPersisted
         touchTimestamps(creating: creating)   // createdAt on INSERT, updatedAt always
@@ -102,7 +111,7 @@ extension Model {
                 assignments.append(column.name + " = ?")
                 bound.append(values[i])
             }
-            if assignments.isEmpty { return [] }   // clean — nothing to write
+            if assignments.isEmpty { return }   // clean — nothing to write
             bound.append(primaryKeyValue)
             let sql = "UPDATE " + Self.schema.table + " SET "
                 + joined(assignments, ", ") + " WHERE " + Self.primaryKeyColumn + " = ?"
@@ -110,7 +119,6 @@ extension Model {
         }
         takeSnapshot()
         try await didSave()
-        return []
     }
 
     /// INSERT-or-UPDATE keyed on the primary key, supplying the PK value explicitly
@@ -123,7 +131,7 @@ extension Model {
     /// Timestamps are touched as `creating: true` for the inserted values; on conflict
     /// every non-PK column except `created_at` is overwritten from the proposed row, so
     /// re-running an upsert (e.g. a seeder) keeps the original creation time.
-    @discardableResult
+    /// Like `save()`, the returned errors must be looked at — see the note there.
     public func upsert(in db: Database? = nil) async throws -> [ValidationError] {
         let db = resolvedDatabase(db)
         let errors = try await validate(in: db)

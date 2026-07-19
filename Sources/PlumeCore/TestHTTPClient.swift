@@ -34,7 +34,14 @@ public struct TestHTTPClient: Sendable {
             body: body,
             context: context
         )
-        let response = await app.handle(request)
+        var response = await app.handle(request)
+        // Tests assert on bytes, so a streamed body is materialised here; a
+        // producer error surfaces as the 500 it would be natively.
+        do {
+            response = try await response.collectingStream()
+        } catch {
+            response = Response.text("500 Internal Server Error", status: 500)
+        }
         for setCookie in response.headers.all("set-cookie") { jar.store(setCookie) }
         return response
     }
@@ -98,6 +105,25 @@ public struct TestHTTPClient: Sendable {
             h.set("content-type", "application/x-www-form-urlencoded")
         }
         return await send(.post, target, headers: h, body: encodeUTF8(form))
+    }
+
+    /// Form POST from name/value pairs. Values are percent-encoded here — a test
+    /// never hand-assembles `a=b&c=d` or forgets to escape an `&` inside a value.
+    public func postForm(_ target: String, fields: [(String, String)],
+                         headers: Headers = Headers()) async -> Response {
+        await postForm(target, TestHTTPClient.encodeFormFields(fields), headers: headers)
+    }
+
+    /// application/x-www-form-urlencoded via the shared `percentEncode` (spaces
+    /// travel as `%20`; `FormParams` decodes `%XX` and `+` alike).
+    static func encodeFormFields(_ fields: [(String, String)]) -> String {
+        var encoded = ""
+        for (name, value) in fields {
+            if !encoded.isEmpty { encoded += "&" }
+            encoded += decodeUTF8(percentEncode(Array(name.utf8))) + "="
+                + decodeUTF8(percentEncode(Array(value.utf8)))
+        }
+        return encoded
     }
 }
 

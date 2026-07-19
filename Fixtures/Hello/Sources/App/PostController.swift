@@ -10,7 +10,7 @@ struct PostController: Controller {
     func index(_ request: Request) async throws -> Response {
         let db = request.bindings.database
         try await Post.createTable(in: db)
-        let posts = try await Post.all().order(by: Post.id, .ascending).all(in: db)
+        let posts = try await Post.query().order(by: Post.id, .ascending).all(in: db)
         if request.wantsJSON { return .json(jsonArray(posts)) }
         var body = "posts (\(posts.count)):"
         for post in posts { body += "\n#\(post.id) \(post.title)" }

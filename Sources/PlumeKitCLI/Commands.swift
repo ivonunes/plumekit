@@ -118,7 +118,8 @@ func newCommand(name: String, plumekitPath: String?) -> Int32 {
 
     // CI workflows, if chosen.
     if let provider = options.ciProvider,
-       let ciFiles = CITemplates.files(provider: provider, target: options.defaultTarget) {
+       let ciFiles = CITemplates.files(provider: provider, target: options.defaultTarget,
+                                       capabilities: options.capabilities) {
         for (filePath, contents) in ciFiles {
             let fullPath = name + "/" + filePath
             try? fileManager.createDirectory(atPath: (fullPath as NSString).deletingLastPathComponent,
@@ -133,7 +134,7 @@ func newCommand(name: String, plumekitPath: String?) -> Int32 {
     _ = compileTemplates(projectPath: name)
 
     print("✓ Created \(name)/ — a PlumeKit app (with a Plume view)")
-    print("  Routes: \(name)/Sources/App/App.swift  ·  Views: \(name)/Views/")
+    print("  Routes: \(name)/Sources/App/Routes.swift  ·  Views: \(name)/Views/")
     print("")
     print("Next:")
     print("  cd \(name)")
@@ -148,9 +149,16 @@ private func scaffoldOptions() -> ScaffoldOptions {
     guard Prompt.isInteractive else { return ScaffoldOptions() }
     var options = ScaffoldOptions()
 
+    // secrets is preselected alongside kv: the scaffold always installs CSRF
+    // protection, which reads CSRF_SECRET through the secrets binding — without it
+    // every form POST answers 500. (Env-backed natively, so it costs nothing.)
     let capNames = ["kv", "database", "storage", "cache", "queue", "http", "secrets"]
-    let picked = Prompt.multiselect("Capabilities?", capNames, preselected: [0])
-    options.capabilities = picked.isEmpty ? ["kv"] : Set(picked.map { capNames[$0] })
+    let picked = Prompt.multiselect("Capabilities?", capNames, preselected: [0, 6])
+    options.capabilities = picked.isEmpty ? ["kv", "secrets"] : Set(picked.map { capNames[$0] })
+    if !options.capabilities.contains("secrets") {
+        print(Style.dim("  Note: without `secrets`, CSRF form protection can't sign tokens —"))
+        print(Style.dim("  form POSTs will fail until you enable it in plumekit.toml."))
+    }
 
     let targets = ["cloudflare", "aws", "native"]
     let targetLabels = ["cloudflare (Workers)", "aws (Lambda)", "native (standalone server)"]
@@ -185,16 +193,11 @@ private func scaffoldOptions() -> ScaffoldOptions {
 // MARK: - serve
 
 func serveCommand(path: String, host: String, port: UInt16) -> Int32 {
-    loadDotEnv(projectPath: path)
     // Development mode: the spawned server inherits this and shows the dev error page
     // when a handler throws. A user-set PLUMEKIT_ENV always wins (overwrite = 0).
     setenv("PLUMEKIT_ENV", "development", 0)
-    let compiled = compileTemplates(projectPath: path)
-    if compiled != 0 { return compiled }
     print("→ plumekit serve — building & starting the native server on http://\(host):\(port)")
-    return runInherit("swift", [
-        "run", "--package-path", path, "Server", "--host", host, "--port", String(port),
-    ])
+    return runAppServer(path: path, ["--host", host, "--port", String(port)])
 }
 
 // MARK: - build
@@ -347,8 +350,8 @@ func buildAWSCommand(path: String, outDir: String = "dist", showNextSteps: Bool 
     let status = runInherit("swift", buildArgs)
     guard status == 0 else {
         errorLine("Lambda build failed.")
-        errorLine("Does this project have a `Lambda` executable target? (see docs/aws.md;")
-        errorLine("the Fixtures/Hello app shows the AWS front-end + [targets.aws] plumekit.toml profile.)")
+        errorLine("Does this project have a `Lambda` executable target? The AWS guide (docs/aws.md)")
+        errorLine("covers the Lambda front-end and the [targets.aws] plumekit.toml profile.")
         return status
     }
 
@@ -621,11 +624,11 @@ private func deployNative(path: String, migrate: Bool, seed: Bool) -> Int32 {
 
 // MARK: - env / doctor / dev / routes
 
-/// Load KEY=VALUE lines from <path>/.env into the environment (existing env wins), so
-/// serve/migrate/dev pick up DATABASE_URL, secrets, etc. without hand-exporting.
-func loadDotEnv(projectPath: String) {
-    guard let contents = try? String(contentsOfFile: projectPath + "/.env", encoding: .utf8) else { return }
+/// The KEY=VALUE pairs of <path>/.env, in file order (empty when there is none).
+func parseDotEnv(projectPath: String) -> [(key: String, value: String)] {
+    guard let contents = try? String(contentsOfFile: projectPath + "/.env", encoding: .utf8) else { return [] }
     let ws = CharacterSet.whitespacesAndNewlines   // trims CR too, so CRLF files work
+    var pairs: [(key: String, value: String)] = []
     for raw in contents.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }) {
         var line = raw.trimmingCharacters(in: ws)
         if line.isEmpty || line.hasPrefix("#") { continue }
@@ -639,7 +642,17 @@ func loadDotEnv(projectPath: String) {
         } else if let hash = value.firstIndex(of: "#") {
             value = String(value[..<hash]).trimmingCharacters(in: ws)   // strip an inline comment
         }
-        if ProcessInfo.processInfo.environment[key] == nil { setenv(key, value, 0) }
+        pairs.append((key, value))
+    }
+    return pairs
+}
+
+/// Load <path>/.env into the environment (existing env always wins), so
+/// serve/migrate/dev pick up DATABASE_URL, secrets, etc. without hand-exporting.
+func loadDotEnv(projectPath: String) {
+    for (key, value) in parseDotEnv(projectPath: projectPath)
+    where ProcessInfo.processInfo.environment[key] == nil {
+        setenv(key, value, 0)
     }
 }
 
@@ -665,26 +678,64 @@ func doctorCommand() -> Int32 {
 
 /// `plumekit routes` — list the app's registered routes (runs the Server with --routes).
 func routesCommand(path: String) -> Int32 {
-    runInherit("swift", ["run", "--package-path", path, "Server", "--routes"])
+    runAppServer(path: path, ["--routes"])
 }
 
 /// `plumekit dev` — serve natively, rebuilding + restarting on source/template changes.
+/// The rebuild runs while the OLD server keeps serving; only a successful build swaps
+/// it. A broken save shows the compile error here and leaves the last working server
+/// up, instead of tearing it down and answering connection refused until it's fixed.
 func devCommand(path: String, host: String, port: UInt16) -> Int32 {
-    loadDotEnv(projectPath: path)
-    setenv("PLUMEKIT_ENV", "development", 0)   // dev error page; a user-set value wins
-    print("→ plumekit dev — watching Sources/ and Views/ (ctrl-c to stop)")
+    // The child's environment is rebuilt per spawn as baseline + a fresh `.env`
+    // overlay (baseline wins — a var the user exported in their shell must never
+    // be clobbered by the file). Rebuilding per spawn also means an edited or
+    // REMOVED `.env` value takes effect on the next restart, which mutating this
+    // process's own environment could never undo.
+    let baseline = ProcessInfo.processInfo.environment
+    func childEnvironment() -> [String: String] {
+        var env = baseline
+        for (key, value) in parseDotEnv(projectPath: path) where baseline[key] == nil {
+            env[key] = value
+        }
+        if env["PLUMEKIT_ENV"] == nil { env["PLUMEKIT_ENV"] = "development" }   // dev error page
+        return env
+    }
+    print("→ plumekit dev — watching Sources/, Views/, Translations/, plumekit.toml, .env (ctrl-c to stop)")
     var server: Process?
-    func restart() {
-        server?.terminate()
-        _ = compileTemplates(projectPath: path)
+
+    func rebuildAndSwap() {
+        if compileTemplates(projectPath: path) != 0 {
+            print("✗ template compile failed — keeping the previous server running")
+            return
+        }
+        let build = Process()
+        build.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        build.arguments = ["swift", "build", "--package-path", path, "--product", "Server"]
+        do { try build.run() } catch {
+            print("✗ could not run swift build: \(error)")
+            return
+        }
+        build.waitUntilExit()
+        guard build.terminationStatus == 0 else {
+            print("✗ build failed — keeping the previous server running")
+            return
+        }
+        if let old = server {
+            old.terminate()
+            old.waitUntilExit()   // reap — a dev session mustn't accumulate zombies
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        // The product was just built, so this run's build step is a no-op check.
         process.arguments = ["swift", "run", "--package-path", path, "Server",
                              "--host", host, "--port", String(port)]
-        try? process.run()
-        server = process
+        process.environment = childEnvironment()
+        do { try process.run(); server = process } catch {
+            print("✗ could not start the server: \(error)")
+        }
     }
-    restart()
+
+    rebuildAndSwap()
     var snapshot = watchSnapshot(path)
     while true {
         Thread.sleep(forTimeInterval: 1.0)
@@ -692,7 +743,7 @@ func devCommand(path: String, host: String, port: UInt16) -> Int32 {
         if current != snapshot {
             snapshot = current
             print("↻ change detected — rebuilding…")
-            restart()
+            rebuildAndSwap()
         }
     }
 }
@@ -700,14 +751,24 @@ func devCommand(path: String, host: String, port: UInt16) -> Int32 {
 private func watchSnapshot(_ path: String) -> [String: Date] {
     var result: [String: Date] = [:]
     let fm = FileManager.default
-    for dir in ["Sources", "Views", "Templates"] {
+    for dir in ["Sources", "Views", "Templates", "Translations"] {
         let base = path + "/" + dir
         guard let enumerator = fm.enumerator(atPath: base) else { continue }
-        for case let file as String in enumerator where file.hasSuffix(".swift") || file.hasSuffix(".plume") {
+        for case let file as String in enumerator
+        where file.hasSuffix(".swift") || file.hasSuffix(".plume") || file.hasSuffix(".json") {
             let full = base + "/" + file
             if let m = (try? fm.attributesOfItem(atPath: full))?[.modificationDate] as? Date {
                 result[full] = m
             }
+        }
+    }
+    // Config the codegen plugin and the runtime read: flipping a capability or
+    // editing an env value must restart too — that's exactly the workflow the
+    // capability prompts point people at.
+    for file in ["plumekit.toml", ".env", ".dev.vars"] {
+        let full = path + "/" + file
+        if let m = (try? fm.attributesOfItem(atPath: full))?[.modificationDate] as? Date {
+            result[full] = m
         }
     }
     return result
@@ -716,17 +777,41 @@ private func watchSnapshot(_ path: String) -> [String: Date] {
 // MARK: - console / test
 
 func consoleCommand(path: String) -> Int32 {
-    loadDotEnv(projectPath: path)
-    let compiled = compileTemplates(projectPath: path)
-    if compiled != 0 { return compiled }
     print("→ plumekit console — building & starting the REPL")
-    return runInherit("swift", ["run", "--package-path", path, "Server", "--console"])
+    return runAppServer(path: path, ["--console"])
 }
 
 // MARK: - generate (scaffolding)
 
 func generateCommand(arguments: [String]) -> Int32 {
-    let usage = "usage: plumekit generate <resource|model|controller|migration|view|middleware|job|seeder|test|auth|notifications|ci> …"
+    let usage = "usage: plumekit generate <resource|model|controller|migration|view|middleware|job|seeder|test|auth|notifications|ci> … [--path <dir>]"
+    var arguments = arguments
+
+    // Generators write project-relative paths, so they run from the project root —
+    // but reach it themselves: `--path` names it explicitly, and otherwise walk up
+    // from the working directory (Rails-style: generate works from a subdirectory).
+    var projectRoot: String?
+    if let flagIndex = arguments.firstIndex(where: { $0 == "--path" }) {
+        guard flagIndex + 1 < arguments.count else { errorLine("--path needs a value"); return 1 }
+        projectRoot = arguments[flagIndex + 1]
+        arguments.removeSubrange(flagIndex...(flagIndex + 1))
+    } else if !FileManager.default.fileExists(atPath: "Sources/App") {
+        var candidate = FileManager.default.currentDirectoryPath
+        while candidate != "/" {
+            if FileManager.default.fileExists(atPath: candidate + "/Sources/App") {
+                projectRoot = candidate
+                break
+            }
+            candidate = (candidate as NSString).deletingLastPathComponent
+        }
+    }
+    if let projectRoot {
+        guard FileManager.default.changeCurrentDirectoryPath(projectRoot) else {
+            errorLine("cannot enter project directory '\(projectRoot)'")
+            return 1
+        }
+    }
+
     guard let kind = arguments.first else { errorLine(usage); return 1 }
 
     // These write into an existing project and take no <Name>.
@@ -736,7 +821,11 @@ func generateCommand(arguments: [String]) -> Int32 {
             errorLine("run `plumekit generate` from a project root (no Sources/App found)")
             return 1
         }
-        return kind == "auth" ? generateAuth() : generateNotifications()
+        if kind == "auth" {
+            guard ensureCapabilities(authRequiredCapabilities, for: "generate auth") else { return 1 }
+            return generateAuth()
+        }
+        return generateNotifications()
     }
 
     guard arguments.count >= 2 else { errorLine(usage); return 1 }
@@ -746,6 +835,12 @@ func generateCommand(arguments: [String]) -> Int32 {
     guard FileManager.default.fileExists(atPath: "Sources/App") else {
         errorLine("run `plumekit generate` from a project root (no Sources/App found)")
         return 1
+    }
+
+    // A generated model that queries a database the app doesn't have kills the
+    // process (`Database.current` traps) — catch it at generate time instead.
+    if kind == "resource" || kind == "model" {
+        guard ensureCapabilities(modelRequiredCapabilities, for: "generate \(kind)") else { return 1 }
     }
 
     switch kind {
@@ -765,6 +860,100 @@ func generateCommand(arguments: [String]) -> Int32 {
     }
 }
 
+/// Check the project has the capabilities a generator's output needs; offer to flip
+/// them in plumekit.toml at a TTY, otherwise print the exact lines to change. Returns
+/// false (after printing why) when generation should not proceed.
+private func ensureCapabilities(_ needed: [String], for what: String) -> Bool {
+    let config = BuildConfig.read(projectPath: ".")
+    let missing = needed.filter { !config.hasCapability($0) }
+    if missing.isEmpty { return true }
+
+    let list = missing.map { "`\($0)`" }.joined(separator: ", ")
+    print("\(what) needs the \(list) capabilit\(missing.count == 1 ? "y" : "ies"), which this app has disabled.")
+    if Prompt.isInteractive, Prompt.confirm("Enable in plumekit.toml now?") {
+        guard enableCapabilities(missing, tomlPath: "plumekit.toml") else {
+            errorLine("could not update plumekit.toml — enable \(list) there manually")
+            return false
+        }
+        for name in missing { print("  plumekit.toml: \(name) = true") }
+        linkDriverDependencies(for: missing)
+        return true
+    }
+    errorLine("enable \(missing.map { "\($0) = true" }.joined(separator: ", ")) under [capabilities] in plumekit.toml, then re-run")
+    return false
+}
+
+/// Which capabilities pull a driver product into the Lambda target. ONE home for
+/// this mapping on the CLI side — the scaffold's Package template and the
+/// enable-time patcher below both read it (plumekit-codegen keeps its own copy;
+/// it is deliberately dependency-free).
+let lambdaDriverProducts: [(capability: String, product: String)] = [
+    ("database", "PlumePostgres"), ("storage", "PlumeS3"),
+]
+
+/// Newly enabled capabilities can need driver products the scaffold only linked
+/// when they were on at `plumekit new` time. Patch Package.swift's Lambda
+/// dependencies so "flip a capability + rebuild" keeps its promise; if the file
+/// has been reshaped beyond recognition, say exactly what to add instead.
+private func linkDriverDependencies(for capabilities: [String]) {
+    let needed = lambdaDriverProducts.filter { pair in capabilities.contains { $0 == pair.capability } }
+    guard !needed.isEmpty,
+          var manifest = try? String(contentsOfFile: "Package.swift", encoding: .utf8) else { return }
+
+    let anchor = #".product(name: "PlumeAWS", package: "PlumeKit")"#
+    var changed = false
+    for (_, product) in needed {
+        let productRef = ".product(name: \"\(product)\", package: \"PlumeKit\")"
+        if manifest.contains(productRef) { continue }
+        if manifest.contains(anchor) {
+            manifest = manifest.replacingOccurrences(of: anchor, with: anchor + ", " + productRef)
+            changed = true
+            print("  Package.swift: linked \(product) into the Lambda target")
+        } else {
+            print("  Add \(productRef) to the Lambda target's dependencies in Package.swift.")
+        }
+    }
+    if changed {
+        try? manifest.write(toFile: "Package.swift", atomically: true, encoding: .utf8)
+    }
+}
+
+/// Flip (or insert) `<name> = true` lines under `[capabilities]` in the toml file.
+private func enableCapabilities(_ names: [String], tomlPath: String) -> Bool {
+    guard var toml = try? String(contentsOfFile: tomlPath, encoding: .utf8) else { return false }
+    var lines = toml.components(separatedBy: "\n")
+    var remaining = Set(names)
+    var section = ""
+    var capabilitiesHeaderIndex: Int? = nil
+    for (index, raw) in lines.enumerated() {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        if line.hasPrefix("[") && line.hasSuffix("]") {
+            section = String(line.dropFirst().dropLast())
+            if section == "capabilities" { capabilitiesHeaderIndex = index }
+            continue
+        }
+        guard section == "capabilities", let eq = line.firstIndex(of: "=") else { continue }
+        let key = line[..<eq].trimmingCharacters(in: .whitespaces)
+        if remaining.contains(key) {
+            lines[index] = "\(key) = true"
+            remaining.remove(key)
+        }
+    }
+    if !remaining.isEmpty {
+        // No existing line to flip — insert after the [capabilities] header, or
+        // append a fresh table.
+        let inserted = remaining.sorted().map { "\($0) = true" }
+        if let headerIndex = capabilitiesHeaderIndex {
+            lines.insert(contentsOf: inserted, at: headerIndex + 1)
+        } else {
+            if lines.last == "" { lines.removeLast() }
+            lines.append(contentsOf: ["", "[capabilities]"] + inserted + [""])
+        }
+    }
+    toml = lines.joined(separator: "\n")
+    return (try? toml.write(toFile: tomlPath, atomically: true, encoding: .utf8)) != nil
+}
+
 /// `plumekit generate ci --provider <github|gitlab|forgejo>` — CI workflows that test
 /// on PRs and run `./plumekit deploy` on push to main (tailored to the [build] target).
 private func generateCI(arguments: [String]) -> Int32 {
@@ -780,7 +969,9 @@ private func generateCI(arguments: [String]) -> Int32 {
     let config = BuildConfig.read(projectPath: ".")
     let target = config.defaultTarget ?? config.targets.first ?? "cloudflare"
 
-    guard let files = CITemplates.files(provider: provider, target: target) else {
+    let capabilities: Set<String> = config.hasCapability("database") ? ["database"] : []
+    guard let files = CITemplates.files(provider: provider, target: target,
+                                        capabilities: capabilities) else {
         errorLine("unknown CI provider '\(provider)' (have: github, gitlab, forgejo)")
         return 1
     }
@@ -810,11 +1001,65 @@ func migrateCommand(path: String, d1: D1Target?, dbName: String?, assumeYes: Boo
         return migrateD1(path: path, d1: d1, dbName: dbName, assumeYes: assumeYes)
     }
     // Native: the app's Server binary applies migrations under --migrate (it holds
-    // the migration list). Codegen is produced by the build plugin first.
+    // the migration list).
+    print("→ plumekit migrate — applying pending schema changes")
+    return runAppServer(path: path, ["--migrate"])
+}
+
+/// The shared prologue for commands that run the app's Server binary: load .env,
+/// compile templates (a freshly generated resource references views that don't
+/// exist as Swift yet), then `swift run Server <arguments>`.
+private func runAppServer(path: String, _ serverArguments: [String]) -> Int32 {
+    loadDotEnv(projectPath: path)
     let compiled = compileTemplates(projectPath: path)
     if compiled != 0 { return compiled }
-    print("→ plumekit migrate — applying pending schema changes")
-    return runInherit("swift", ["run", "--package-path", path, "Server", "--migrate"])
+    return runInherit("swift", ["run", "--package-path", path, "Server"] + serverArguments)
+}
+
+/// The new migrate subcommands ride Server flags that apps scaffolded before them
+/// don't parse — and an old Server main falls through unknown flags and BOOTS THE
+/// HTTP SERVER. Check the (user-owned, never regenerated) entry point mentions the
+/// flag before running, and say what to add when it doesn't.
+private func serverSupportsFlag(_ flag: String, path: String) -> Bool {
+    guard let main = try? String(contentsOfFile: path + "/Sources/Server/main.swift",
+                                 encoding: .utf8) else {
+        return true   // unusual layout — don't block; worst case the server prints usage
+    }
+    return main.contains(flag)
+}
+
+/// `plumekit migrate --rollback [N]` — reverse the newest N applied migrations
+/// (their `down:` blocks) against the native database.
+func migrateRollbackCommand(path: String, steps: Int, d1: D1Target?) -> Int32 {
+    guard d1 == nil else {
+        errorLine("migrate --rollback works against the native database only — D1 migrations")
+        errorLine("are applied as forward-only SQL batches (write a new migration to undo).")
+        return 1
+    }
+    guard serverSupportsFlag("--rollback", path: path) else {
+        errorLine("this app's Sources/Server/main.swift predates `migrate --rollback`.")
+        errorLine("Add the `--rollback` / `--migration-status` flags there (a freshly scaffolded")
+        errorLine("app's Server main shows the shape), then re-run.")
+        return 1
+    }
+    print("→ plumekit migrate --rollback — reversing the last \(steps) migration(s)")
+    return runAppServer(path: path, ["--rollback", String(steps)])
+}
+
+/// `plumekit migrate --status` — each migration and whether it has been applied.
+func migrateStatusCommand(path: String, d1: D1Target?) -> Int32 {
+    guard d1 == nil else {
+        errorLine("migrate --status works against the native database — for D1, `plumekit migrate")
+        errorLine("--local|--remote` already reports the target ledger before applying.")
+        return 1
+    }
+    guard serverSupportsFlag("--migration-status", path: path) else {
+        errorLine("this app's Sources/Server/main.swift predates `migrate --status`.")
+        errorLine("Add the `--migration-status` / `--rollback` flags there (a freshly scaffolded")
+        errorLine("app's Server main shows the shape), then re-run.")
+        return 1
+    }
+    return runAppServer(path: path, ["--migration-status"])
 }
 
 func seedCommand(path: String, only: String? = nil, d1: D1Target?, dbName: String?, assumeYes: Bool) -> Int32 {
@@ -822,12 +1067,10 @@ func seedCommand(path: String, only: String? = nil, d1: D1Target?, dbName: Strin
     if let d1 {
         return applyToD1(path: path, verb: "seed", dumpMode: "seed", only: only, d1: d1, dbName: dbName, assumeYes: assumeYes)
     }
-    let compiled = compileTemplates(projectPath: path)
-    if compiled != 0 { return compiled }
     print("→ plumekit seed — inserting seed data\(only.map { " (\($0))" } ?? "")")
-    var args = ["run", "--package-path", path, "Server", "--seed"]
+    var args = ["--seed"]
     if let only { args.append(only) }
-    return runInherit("swift", args)
+    return runAppServer(path: path, args)
 }
 
 // wrangler must never block on an interactive prompt it can't reach: a wrangler that
@@ -1167,6 +1410,10 @@ private func wranglerDatabaseName(_ tomlPath: String) -> String? {
     return nil
 }
 
-func testCommand(path: String) -> Int32 {
-    return runInherit("swift", ["test", "--package-path", path])
+func testCommand(path: String, extraArguments: [String] = []) -> Int32 {
+    // Compile templates first, like serve/migrate/console — a freshly generated
+    // resource references views that don't exist as Swift yet.
+    let compiled = compileTemplates(projectPath: path)
+    if compiled != 0 { return compiled }
+    return runInherit("swift", ["test", "--package-path", path] + extraArguments)
 }

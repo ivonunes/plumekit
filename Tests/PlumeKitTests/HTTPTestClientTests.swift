@@ -34,3 +34,17 @@ import Testing
     #expect(response.status == 200)
     #expect(response.bodyText == "Hello World")
 }
+
+@Test func postFormFieldsArePercentEncoded() async {
+    let app = Application()
+    app.post("/submit") { request in
+        // Values with &, =, + and non-ASCII round-trip through the encoder.
+        .text((request.form["a"] ?? "") + "|" + (request.form["b"] ?? ""))
+    }
+
+    let response = await TestHTTPClient(app).postForm("/submit", fields: [
+        ("a", "one & two = three"),
+        ("b", "café+snake"),
+    ])
+    #expect(response.bodyText == "one & two = three|café+snake")
+}

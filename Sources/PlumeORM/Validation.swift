@@ -4,7 +4,8 @@ import _Concurrency
 // Validations: declared as concrete value types holding closures (NO keypaths —
 // they're forbidden under embedded wasm), so they run identically on D1 and native
 // SQLite. Field rules are synchronous; uniqueness is async (a query through the neutral
-// SQLDatabase). `save()` validates first and throws ValidationFailed on errors.
+// SQLDatabase). `save()` validates first and RETURNS the errors — persisting
+// nothing — when any rule fails; it does not throw for validation failures.
 //
 // Text length counts UTF-8 BYTES, not graphemes — `String.count` needs Unicode
 // tables that don't link under embedded wasm. No regex for
@@ -66,6 +67,9 @@ public struct AsyncValidation<M>: @unchecked Sendable {
 
 extension AsyncValidation where M: Model {
     /// No other row may share `value` in `column` (excluding this instance).
+    /// This is a SELECT-then-INSERT check, so two concurrent saves can both pass it;
+    /// the real guarantee is a UNIQUE index on the column (the auth generator creates
+    /// one). Treat this rule as the friendly error message, not the enforcement.
     public static func unique(
         _ field: String, column: String, _ value: @escaping @Sendable (M) -> SQLValue
     ) -> AsyncValidation {

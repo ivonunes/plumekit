@@ -1,4 +1,5 @@
 import CSQLite
+import Foundation
 import PlumeCore
 
 // Native SQL adapter: SQLite via the system library. Conforms to the neutral
@@ -24,6 +25,16 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 public final class SQLiteDatabase: SQLDatabase, @unchecked Sendable {
     private let handle: OpaquePointer
 
+    /// Reusable prepared statements, keyed by SQL. The ORM issues a small set of
+    /// stable statements (find-by-PK, the INSERT/UPDATE shapes), so re-parsing per
+    /// call is pure waste. A statement must be used by ONE task at a time — the
+    /// connection's FULLMUTEX serialises individual C calls, not whole steps — so
+    /// this is a checkout pool: `query` removes the entry while using it, and a
+    /// concurrent call with the same SQL just prepares a transient statement.
+    private let cacheLock = NSLock()
+    private var cachedStatements: [String: OpaquePointer] = [:]
+    private static let maxCachedStatements = 64
+
     /// Open a database at `path` (use `":memory:"` for an ephemeral one).
     ///
     /// FULLMUTEX: the one connection is shared across Swift-concurrency threads
@@ -39,16 +50,22 @@ public final class SQLiteDatabase: SQLDatabase, @unchecked Sendable {
         }
         handle = h
         sqlite3_busy_timeout(handle, 5000)   // writers back off instead of erroring
+        // The standard server-SQLite configuration: WAL lets readers proceed during a
+        // write and turns every write from journal+db double-fsync into one WAL append;
+        // synchronous=NORMAL is WAL's designed durability point (safe against crashes,
+        // an order of magnitude fewer fsyncs). A no-op for `:memory:` databases.
+        sqlite3_exec(handle, "PRAGMA journal_mode=WAL", nil, nil, nil)
+        sqlite3_exec(handle, "PRAGMA synchronous=NORMAL", nil, nil, nil)
     }
 
-    deinit { sqlite3_close(handle) }
+    deinit {
+        for statement in cachedStatements.values { sqlite3_finalize(statement) }
+        sqlite3_close(handle)
+    }
 
     public func query(_ sql: String, _ parameters: [SQLValue]) async throws -> QueryResult {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            throw SQLiteError.prepare(String(cString: sqlite3_errmsg(handle)))
-        }
-        defer { sqlite3_finalize(stmt) }
+        let stmt = try checkoutStatement(sql)
+        defer { returnStatement(stmt, for: sql) }
 
         for (i, value) in parameters.enumerated() {
             let idx = Int32(i + 1)
@@ -126,5 +143,35 @@ public final class SQLiteDatabase: SQLDatabase, @unchecked Sendable {
             rowsAffected: Int(sqlite3_changes(handle)),
             lastInsertID: sqlite3_last_insert_rowid(handle)
         )
+    }
+
+    /// A ready statement for `sql`: the cached one (removed from the pool while in
+    /// use), or a fresh prepare on a miss. sqlite3_prepare_v2 statements re-prepare
+    /// themselves transparently after a schema change, so reuse is always safe.
+    private func checkoutStatement(_ sql: String) throws -> OpaquePointer {
+        cacheLock.lock()
+        let cached = cachedStatements.removeValue(forKey: sql)
+        cacheLock.unlock()
+        if let cached { return cached }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            throw SQLiteError.prepare(String(cString: sqlite3_errmsg(handle)))
+        }
+        return stmt
+    }
+
+    /// Reset (releasing its locks), clear bindings, and pool the statement for
+    /// reuse — or finalize it when the pool is full or already holds this SQL.
+    private func returnStatement(_ stmt: OpaquePointer, for sql: String) {
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
+        cacheLock.lock()
+        if cachedStatements.count < Self.maxCachedStatements, cachedStatements[sql] == nil {
+            cachedStatements[sql] = stmt
+            cacheLock.unlock()
+        } else {
+            cacheLock.unlock()
+            sqlite3_finalize(stmt)
+        }
     }
 }

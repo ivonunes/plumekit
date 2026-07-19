@@ -20,6 +20,35 @@ struct Codegen {
         let outputDir = arguments[2]
         let kind = arguments[3]
 
+        // `linked=<products>` (from the build plugin): the driver modules this target
+        // depends on, so a capability that needs an unlinked driver becomes a clear
+        // `#error` instead of a bare "no such module 'PlumePostgres'".
+        var linkedDrivers: Set<String> = []
+        var sawLinkedArgument = false
+        for argument in arguments.dropFirst(4) where argument.hasPrefix("linked=") {
+            sawLinkedArgument = true
+            for name in argument.dropFirst("linked=".count).split(separator: ",") {
+                linkedDrivers.insert(String(name))
+            }
+        }
+        // Standalone/legacy invocations don't pass it — assume everything is linked.
+        if !sawLinkedArgument { linkedDrivers = ["PlumePostgres", "PlumeS3"] }
+
+        /// If the generated composition imports a driver module the target doesn't
+        /// link, replace it with a `#error` naming the exact Package.swift change.
+        func gateDrivers(_ source: String, target: String) -> String {
+            var errors = ""
+            let drivers = [("PlumePostgres", "database"), ("PlumeS3", "storage")]
+            for (product, capability) in drivers
+            where source.contains("import \(product)") && !linkedDrivers.contains(product) {
+                errors += "#error(\"The `\(capability)` capability needs the \(product) driver "
+                    + "linked into the \(target) target. In Package.swift, add "
+                    + ".product(name: \\\"\(product)\\\", package: \\\"PlumeKit\\\") to its "
+                    + "dependencies, then rebuild.\")\n"
+            }
+            return errors.isEmpty ? source : errors
+        }
+
         // Parse the (tiny, well-formed) plumekit.toml subset we care about. A missing
         // manifest is fine — we fall back to defaults so the project still builds.
         var native: [String: String] = [:]
@@ -62,9 +91,11 @@ struct Codegen {
             write(dataRegistry(projectRoot: root, defaultLocale: i18n["default"] ?? "en"),
                   named: "PlumeKitData.swift", in: outputDir)
         case "composition":
-            write(composition(native: native, present: present), named: "Composition.swift", in: outputDir)
+            write(gateDrivers(composition(native: native, present: present), target: "Server"),
+                  named: "Composition.swift", in: outputDir)
         case "aws-composition":
-            write(awsComposition(present: present), named: "Composition.swift", in: outputDir)
+            write(gateDrivers(awsComposition(present: present), target: "Lambda"),
+                  named: "Composition.swift", in: outputDir)
         case "docs-embed":
             // For this kind arg[1] (the manifest slot) is the docs/ directory to embed.
             write(docsEmbedded(docsDir: manifestPath), named: "DocsEmbedded.swift", in: outputDir)
@@ -86,7 +117,11 @@ struct Codegen {
         let fm = FileManager.default
         let subpaths = (try? fm.subpathsOfDirectory(atPath: docsDir)) ?? []
         // Sorted by relative path so the order is deterministic and matches liveDocs().
-        let markdown = subpaths.filter { $0.hasSuffix(".md") }.sorted()
+        // upgrading/next.md is unreleased-only working notes — excluded here and in
+        // liveDocs(), so no installed CLI ever serves it.
+        let markdown = subpaths
+            .filter { $0.hasSuffix(".md") && $0 != "upgrading/next.md" }
+            .sorted()
         var entries: [String] = []
         for rel in markdown {
             let full = docsDir + "/" + rel

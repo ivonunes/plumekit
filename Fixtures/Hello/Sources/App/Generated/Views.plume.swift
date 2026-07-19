@@ -3,30 +3,30 @@ import PlumeRuntime
 
 func page(title: String, items: [Item], into out: inout HTML) {
     out.literal("<!doctype html>\n<html><head><title>")
-#sourceLocation(file: "Views.Views.plume", line: 2)
+#sourceLocation(file: "Fixtures.Hello.Views.Views.plume", line: 2)
     out.text(title)
 #sourceLocation()
     out.literal("</title></head>\n<body><h1>")
-#sourceLocation(file: "Views.Views.plume", line: 3)
+#sourceLocation(file: "Fixtures.Hello.Views.Views.plume", line: 3)
     out.text(title)
 #sourceLocation()
     out.literal("</h1>")
-#sourceLocation(file: "Views.Views.plume", line: 3)
+#sourceLocation(file: "Fixtures.Hello.Views.Views.plume", line: 3)
     if Plume.truthy((items.count > 0)) {
 #sourceLocation()
         out.literal("<ul>")
-#sourceLocation(file: "Views.Views.plume", line: 3)
+#sourceLocation(file: "Fixtures.Hello.Views.Views.plume", line: 3)
         let __plume_seq_0 = Array(items)
 #sourceLocation()
         for (__plume_i_1, item) in __plume_seq_0.enumerated() {
             let forloop = PlumeForLoop(index: __plume_i_1, count: __plume_seq_0.count)
             _ = forloop
             out.literal("<li>")
-#sourceLocation(file: "Views.Views.plume", line: 3)
+#sourceLocation(file: "Fixtures.Hello.Views.Views.plume", line: 3)
             out.text(forloop.index)
 #sourceLocation()
             out.literal(". ")
-#sourceLocation(file: "Views.Views.plume", line: 3)
+#sourceLocation(file: "Fixtures.Hello.Views.Views.plume", line: 3)
             out.text(item.name)
 #sourceLocation()
             out.literal("</li>")
@@ -39,7 +39,7 @@ func page(title: String, items: [Item], into out: inout HTML) {
 }
 
 func page(title: String, items: [Item]) -> HTML {
-    var out = HTML()
+    var out = HTML(reservingCapacity: 256)
     page(title: title, items: items, into: &out)
     return out
 }

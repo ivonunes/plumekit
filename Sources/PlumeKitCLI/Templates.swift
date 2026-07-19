@@ -11,7 +11,10 @@ struct ScaffoldOptions {
     var capabilities: Set<String> = ["kv", "secrets"]   // secrets: CSRF_SECRET signs form tokens
     var defaultTarget: String = "cloudflare"
     var nativeDatabaseDriver: String = "sqlite"
-    var includeDockerfile: Bool = true
+    // A Dockerfile only matters for a containerised NATIVE deploy; the default
+    // target is cloudflare, so the non-interactive default matches the
+    // interactive flow (which only offers one for `native`).
+    var includeDockerfile: Bool = false
     var ciProvider: String? = nil
 }
 
@@ -186,6 +189,15 @@ import PlumeORM
 
 public func runMigrations(in db: Database) async throws -> [String] {
     try await Migrator(plumeKitMigrations).migrate(in: db)
+}
+
+// `plumekit migrate --rollback [N]` / `--status` run these through the Server binary.
+public func rollbackMigrations(in db: Database, steps: Int) async throws -> [String] {
+    try await Migrator(plumeKitMigrations).rollback(in: db, steps: steps)
+}
+
+public func migrationStatus(in db: Database) async throws -> [(version: String, applied: Bool)] {
+    try await Migrator(plumeKitMigrations).status(in: db)
 }
 
 // Ledger-aware pending-migration SQL for `plumekit migrate --local|--remote`: given the
@@ -393,6 +405,8 @@ var consoleMode = false
 var migrateMode = false
 var seedMode = false
 var seedOnly: String?
+var rollbackSteps: Int?
+var statusMode = false
 var dumpMode = false
 var dumpArg = "all"
 var dumpExtra: String?
@@ -418,6 +432,11 @@ while i < arguments.count {
         consoleMode = true
     case "--migrate":
         migrateMode = true
+    case "--rollback":
+        rollbackSteps = 1
+        if i + 1 < arguments.count, let n = Int(arguments[i + 1]), n > 0 { rollbackSteps = n; i += 1 }
+    case "--migration-status":
+        statusMode = true
     case "--seed":
         seedMode = true
         if i + 1 < arguments.count, !arguments[i + 1].hasPrefix("-") { seedOnly = arguments[i + 1]; i += 1 }
@@ -494,6 +513,32 @@ if migrateMode {
         let applied = try await runMigrations(in: database)
         print(applied.isEmpty ? "plumekit migrate: schema up to date" : "plumekit migrate: applied \(applied.count) change(s)")
         for version in applied { print("  + \(version)") }
+    } catch {
+        print("plumekit migrate: \(error)")
+        exit(1)
+    }
+} else if let rollbackSteps {
+    guard let database = context.database else {
+        print("plumekit migrate: no database driver configured in plumekit.toml")
+        exit(1)
+    }
+    do {
+        let reverted = try await rollbackMigrations(in: database, steps: rollbackSteps)
+        print(reverted.isEmpty ? "plumekit migrate: nothing to roll back" : "plumekit migrate: rolled back \(reverted.count) change(s)")
+        for version in reverted { print("  - \(version)") }
+    } catch {
+        print("plumekit migrate: \(error)")
+        exit(1)
+    }
+} else if statusMode {
+    guard let database = context.database else {
+        print("plumekit migrate: no database driver configured in plumekit.toml")
+        exit(1)
+    }
+    do {
+        for entry in try await migrationStatus(in: database) {
+            print("  \(entry.applied ? "up  " : "down")  \(entry.version)")
+        }
     } catch {
         print("plumekit migrate: \(error)")
         exit(1)
@@ -615,17 +660,17 @@ runs natively, on Cloudflare Workers, and on AWS Lambda.
 ## Develop natively
 
 ```
-plumekit serve
+./plumekit dev         # serve + rebuild/restart on change
 #   GET /            -> the welcome page (Views/HomePage.plume)
 #   GET /hello/ada   -> Hello, ada!
 #   GET /count       -> count=N   (KV-backed, persisted under .plumekit/kv)
-plumekit console       # interactive: type `GET /count`
+./plumekit console     # interactive: type `GET /count`
 ```
 
 ## Deploy to Cloudflare Workers
 
 ```
-plumekit build --target cloudflare       # compiles to Wasm, emits dist/cloudflare/
+./plumekit build --target cloudflare     # compiles to Wasm, emits dist/cloudflare/
 cd dist/cloudflare
 # Create a KV namespace and put its id in wrangler.toml, then:
 wrangler dev                            # or: wrangler deploy
@@ -634,7 +679,7 @@ wrangler dev                            # or: wrangler deploy
 ## Deploy to AWS Lambda
 
 ```
-plumekit build --target aws              # packages dist/aws/{bootstrap,function.zip}
+./plumekit build --target aws            # packages dist/aws/{bootstrap,function.zip}
 # See dist/aws/README.md for env vars and a deploy snippet. Test locally against
 # LocalStack by setting AWS_ENDPOINT_URL=http://localhost:4566.
 ```
@@ -689,14 +734,16 @@ ambient: the ORM uses the request's database (`Post.all()`), and the rest are a
         location=""
         if [ -f "$lock" ]; then
           block="$(grep -A6 -E '"identity"[[:space:]]*:[[:space:]]*"(plumekit|plume)"' "$lock" || true)"
-          [ -n "$version" ] || version="$(printf '%s\n' "$block" | grep '"version"' | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
-          location="$(printf '%s\n' "$block" | grep '"location"' | head -1 | sed -E 's/.*"location"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          # `|| true`: a missing pin (e.g. the package is in `swift package edit`
+          # mode) must fall through to the guidance below, not die under pipefail.
+          [ -n "$version" ] || version="$(printf '%s\n' "$block" | grep '"version"' | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+          location="$(printf '%s\n' "$block" | grep '"location"' | head -1 | sed -E 's/.*"location"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
         fi
 
         if [ -z "$version" ]; then
           echo "plumekit: couldn't determine the PlumeKit version from Package.resolved." >&2
-          echo "  Depending on PlumeKit by path/branch? Build the CLI and set PLUMEKIT_BIN," >&2
-          echo "  or set PLUMEKIT_VERSION=x.y.z." >&2
+          echo "  Depending on PlumeKit by path/branch, or in \`swift package edit\` mode?" >&2
+          echo "  Build the CLI and set PLUMEKIT_BIN, or set PLUMEKIT_VERSION=x.y.z." >&2
           exit 1
         fi
 
@@ -848,8 +895,10 @@ import PlumeTesting
         }
         let serverDriverDeps = options.nativeDatabaseDriver == "postgres" ? product("PlumePostgres") : ""
         var lambdaDriverDeps = ""
-        if options.capabilities.contains("database") { lambdaDriverDeps += product("PlumePostgres") }
-        if options.capabilities.contains("storage") { lambdaDriverDeps += product("PlumeS3") }
+        for (capability, productName) in lambdaDriverProducts
+        where options.capabilities.contains(capability) {
+            lambdaDriverDeps += product(productName)
+        }
 
         func sub(_ s: String) -> String {
             s.replacingOccurrences(of: "__NAME__", with: name)

@@ -10,64 +10,85 @@ import PlumeCore
         return dir
     }
 
-    @Test func servesFileWithContentTypeAndBody() throws {
+    @Test func looksUpFileWithTypeSizeAndValidators() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
-        try "body { color: red }".write(toFile: dir + "/styles.css", atomically: true, encoding: .utf8)
+        let css = "body { color: red }"
+        try css.write(toFile: dir + "/styles.css", atomically: true, encoding: .utf8)
 
-        let response = StaticFiles.response(for: "/styles.css", in: dir)
-        #expect(response?.status == 200)
-        #expect(response?.headers.first("content-type")?.contains("text/css") == true)
-        #expect(response?.headers.first("cache-control") != nil)
-        #expect(String(decoding: response?.body ?? [], as: UTF8.self) == "body { color: red }")
+        let root = try #require(StaticFiles.resolveRoot(dir))
+        let info = try #require(StaticFiles.lookup(requestPath: "/styles.css", root: root))
+        #expect(info.contentType.contains("text/css"))
+        #expect(info.size == css.utf8.count)
+        #expect(!info.cacheControl.isEmpty)
+        #expect(info.etag.hasPrefix("W/\""))
+        #expect(info.lastModified.hasSuffix("GMT"))
     }
 
-    @Test func servesNestedPathWithBinaryContentType() throws {
+    @Test func looksUpNestedPathWithBinaryContentType() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
         try FileManager.default.createDirectory(atPath: dir + "/img", withIntermediateDirectories: true)
         try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: dir + "/img/logo.png"))
 
-        let response = StaticFiles.response(for: "/img/logo.png", in: dir)
-        #expect(response?.status == 200)
-        #expect(response?.headers.first("content-type") == "image/png")
+        let root = try #require(StaticFiles.resolveRoot(dir))
+        let info = try #require(StaticFiles.lookup(requestPath: "/img/logo.png", root: root))
+        #expect(info.contentType == "image/png")
+        #expect(info.size == 4)
     }
 
     @Test func missingFileFallsThrough() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
-        #expect(StaticFiles.response(for: "/nope.css", in: dir) == nil)
+        let root = try #require(StaticFiles.resolveRoot(dir))
+        #expect(StaticFiles.lookup(requestPath: "/nope.css", root: root) == nil)
+    }
+
+    @Test func missingRootResolvesToNil() throws {
+        #expect(StaticFiles.resolveRoot("/no/such/directory/plume") == nil)
     }
 
     @Test func directoryIsNotServed() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
         try FileManager.default.createDirectory(atPath: dir + "/sub", withIntermediateDirectories: true)
-        #expect(StaticFiles.response(for: "/sub", in: dir) == nil)
+        let root = try #require(StaticFiles.resolveRoot(dir))
+        #expect(StaticFiles.lookup(requestPath: "/sub", root: root) == nil)
     }
 
     @Test func pathTraversalIsBlocked() throws {
-        let root = try makeTempDir()
-        defer { try? FileManager.default.removeItem(atPath: root) }
-        let publicDir = root + "/Public"
+        let tempRoot = try makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: tempRoot) }
+        let publicDir = tempRoot + "/Public"
         try FileManager.default.createDirectory(atPath: publicDir, withIntermediateDirectories: true)
         // A secret sibling of Public/, reachable only by escaping the root with `..`.
-        try "TOPSECRET".write(toFile: root + "/secret.txt", atomically: true, encoding: .utf8)
+        try "TOPSECRET".write(toFile: tempRoot + "/secret.txt", atomically: true, encoding: .utf8)
 
-        #expect(StaticFiles.response(for: "/../secret.txt", in: publicDir) == nil)
-        #expect(StaticFiles.response(for: "/..%2Fsecret.txt", in: publicDir) == nil)
+        let root = try #require(StaticFiles.resolveRoot(publicDir))
+        #expect(StaticFiles.lookup(requestPath: "/../secret.txt", root: root) == nil)
+        #expect(StaticFiles.lookup(requestPath: "/..%2Fsecret.txt", root: root) == nil)
     }
-}
 
-extension StaticFilesTests {
     @Test func symlinkEscapingTheRootIsNotServed() throws {
-        let root = try makeTempDir()
-        defer { try? FileManager.default.removeItem(atPath: root) }
-        let publicDir = root + "/Public"
+        let tempRoot = try makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: tempRoot) }
+        let publicDir = tempRoot + "/Public"
         try FileManager.default.createDirectory(atPath: publicDir, withIntermediateDirectories: true)
-        try "TOPSECRET".write(toFile: root + "/secret.txt", atomically: true, encoding: .utf8)
+        try "TOPSECRET".write(toFile: tempRoot + "/secret.txt", atomically: true, encoding: .utf8)
         try FileManager.default.createSymbolicLink(atPath: publicDir + "/leak.txt",
-                                                   withDestinationPath: root + "/secret.txt")
-        #expect(StaticFiles.response(for: "/leak.txt", in: publicDir) == nil)
+                                                   withDestinationPath: tempRoot + "/secret.txt")
+        let root = try #require(StaticFiles.resolveRoot(publicDir))
+        #expect(StaticFiles.lookup(requestPath: "/leak.txt", root: root) == nil)
+    }
+
+    @Test func etagChangesWithContent() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try "one".write(toFile: dir + "/a.txt", atomically: true, encoding: .utf8)
+        let root = try #require(StaticFiles.resolveRoot(dir))
+        let first = try #require(StaticFiles.lookup(requestPath: "/a.txt", root: root))
+        try "three!".write(toFile: dir + "/a.txt", atomically: true, encoding: .utf8)
+        let second = try #require(StaticFiles.lookup(requestPath: "/a.txt", root: root))
+        #expect(first.etag != second.etag)   // size differs even when mtime granularity hides the write
     }
 }

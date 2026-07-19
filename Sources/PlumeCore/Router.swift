@@ -12,17 +12,20 @@ enum PathSegment {
     case wildcard(String, allowEmpty: Bool)
 }
 
-/// A registered route: an HTTP method, a parsed path pattern, and its handler.
+/// A registered route: an HTTP method, a parsed path pattern, its handler, and
+/// how it takes its request body.
 struct RegisteredRoute {
     let method: HTTPMethod
     let pattern: [PathSegment]
     let handler: Responder
+    let bodyMode: RequestBodyMode
 }
 
 /// The outcome of matching a request against the route table.
 public enum RouteMatch {
-    /// A route matched; carries its handler and the captured path parameters.
-    case found(Responder, Parameters)
+    /// A route matched; carries its handler, the captured path parameters, and
+    /// the route's request-body mode.
+    case found(Responder, Parameters, RequestBodyMode)
     /// The path matched one or more routes, but none for this method.
     case methodNotAllowed
     /// No route matched the path at all.
@@ -55,16 +58,22 @@ public struct Router {
     }
 
     /// Register `handler` for `method` at `path` (e.g. `/hello/:name`).
-    public mutating func add(_ method: HTTPMethod, _ path: String, _ handler: @escaping Responder) {
-        routes.append(RegisteredRoute(method: method, pattern: Router.parse(path), handler: handler))
+    public mutating func add(_ method: HTTPMethod, _ path: String, _ handler: @escaping Responder,
+                             bodyMode: RequestBodyMode = .buffered) {
+        routes.append(RegisteredRoute(method: method, pattern: Router.parse(path),
+                                      handler: handler, bodyMode: bodyMode))
     }
 
     /// Match a request path, distinguishing "no such path" (404) from "wrong
     /// method for an existing path" (405).
     public func match(method: HTTPMethod, path: String) -> RouteMatch {
-        let segments = Router.split(path)
+        // Decode the request's segments ONCE — they are the same for every route, and
+        // decoding inside `captures` would redo it per route (R routes × S segments
+        // allocations per request).
+        var segments = Router.split(path)
+        for i in 0..<segments.count { segments[i] = percentDecodePath(segments[i]) }
         var pathMatchedSomeRoute = false
-        var best: (handler: Responder, params: Parameters, score: Int)?
+        var best: (handler: Responder, params: Parameters, bodyMode: RequestBodyMode, score: Int)?
 
         for route in routes {
             guard let params = Router.captures(pattern: route.pattern, segments: segments) else {
@@ -77,11 +86,11 @@ public struct Router {
             // Ties keep the first registered (strict `<`).
             let score = specificity(route.pattern)
             if best == nil || score < best!.score {
-                best = (route.handler, params, score)
+                best = (route.handler, params, route.bodyMode, score)
             }
         }
 
-        if let best { return .found(best.handler, best.params) }
+        if let best { return .found(best.handler, best.params, best.bodyMode) }
         return pathMatchedSomeRoute ? .methodNotAllowed : .notFound
     }
 
@@ -143,7 +152,12 @@ public struct Router {
         return out
     }
 
-    /// If `pattern` matches `segments`, return the captured parameters; else nil.
+    /// If `pattern` matches `segments` (the request path split and percent-DECODED —
+    /// `match` does that once for all routes), return the captured parameters; else nil.
+    /// Comparing decoded means a percent-encoded spelling of a literal path
+    /// (`/admin/s%65ttings`) matches its route instead of silently falling through to
+    /// a `:param` route (a handler/auth mismatch); segment splitting happens before
+    /// decoding, so an encoded `%2F` still can't span segments.
     static func captures(pattern: [PathSegment], segments: [[UInt8]]) -> Parameters? {
         var params = Parameters()
         for i in 0..<pattern.count {
@@ -156,18 +170,13 @@ public struct Router {
                     if j > i { rest.append(slash) }
                     rest.append(contentsOf: segments[j])
                 }
-                params.set(name, decodeUTF8(percentDecodePath(rest)))
+                params.set(name, decodeUTF8(rest))
                 return params
             case .literal(let lit):
-                // Compare against the DECODED segment so a percent-encoded spelling of a
-                // literal path (`/admin/s%65ttings`) matches its route instead of silently
-                // falling through to a `:param` route (a handler/auth mismatch). The
-                // exact-length check below still stops an encoded `%2F` from spanning
-                // segments.
-                guard i < segments.count, lit == percentDecodePath(segments[i]) else { return nil }
+                guard i < segments.count, lit == segments[i] else { return nil }
             case .parameter(let name):
                 guard i < segments.count else { return nil }
-                params.set(name, decodeUTF8(percentDecodePath(segments[i])))
+                params.set(name, decodeUTF8(segments[i]))
             }
         }
         // No catch-all consumed the tail → lengths must match exactly.

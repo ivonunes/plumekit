@@ -98,7 +98,15 @@ public enum LambdaAdapter {
     /// response bytes. Exercised directly in tests with real event JSON.
     public static func processInvocation(_ app: Application, context: Context, eventJSON: Data) async -> Data {
         let request = makeRequest(eventJSON: eventJSON, context: context)
-        return responseJSON(await app.handle(request))
+        var response = await app.handle(request)
+        // Lambda responses are one buffered payload — run a streamed body to
+        // completion; a producer error becomes the 500 it would be natively.
+        do {
+            response = try await response.collectingStream()
+        } catch {
+            response = Response.text("500 Internal Server Error", status: 500)
+        }
+        return responseJSON(response)
     }
 
     /// The Lambda custom-runtime loop: poll the Runtime API, dispatch each event

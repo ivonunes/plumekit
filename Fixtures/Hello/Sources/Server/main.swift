@@ -17,6 +17,8 @@ var port: UInt16 = 8080
 var stateDir = ".plumekit"
 var consoleMode = false
 var migrateMode = false
+var rollbackSteps: Int?
+var statusMode = false
 
 let arguments = CommandLine.arguments
 
@@ -39,6 +41,11 @@ while i < arguments.count {
         consoleMode = true
     case "--migrate":
         migrateMode = true
+    case "--rollback":
+        rollbackSteps = 1
+        if i + 1 < arguments.count, let n = Int(arguments[i + 1]), n > 0 { rollbackSteps = n; i += 1 }
+    case "--migration-status":
+        statusMode = true
     default:
         break
     }
@@ -68,6 +75,34 @@ if migrateMode {
         } else {
             print("plumekit migrate: applied \(applied.count) change(s):")
             for version in applied { print("  + \(version)") }
+        }
+    } catch {
+        print("plumekit migrate: \(error)")
+        exit(1)
+    }
+} else if let rollbackSteps {
+    NativeDrivers.installNativeClock()
+    guard let database = context.database else {
+        print("plumekit migrate: no database driver configured in plumekit.toml")
+        exit(1)
+    }
+    do {
+        let reverted = try await appMigrator().rollback(in: database, steps: rollbackSteps)
+        print(reverted.isEmpty ? "plumekit migrate: nothing to roll back" : "plumekit migrate: rolled back \(reverted.count) change(s)")
+        for version in reverted { print("  - \(version)") }
+    } catch {
+        print("plumekit migrate: \(error)")
+        exit(1)
+    }
+} else if statusMode {
+    NativeDrivers.installNativeClock()
+    guard let database = context.database else {
+        print("plumekit migrate: no database driver configured in plumekit.toml")
+        exit(1)
+    }
+    do {
+        for entry in try await appMigrator().status(in: database) {
+            print("  \(entry.applied ? "up  " : "down")  \(entry.version)")
         }
     } catch {
         print("plumekit migrate: \(error)")

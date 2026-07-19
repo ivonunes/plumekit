@@ -73,19 +73,16 @@ public func plumekitChannelVerify(
 
 private func copyChannelBytes(_ ptr: UnsafeMutableRawPointer?, _ len: Int32) -> [UInt8] {
     let n = len > 0 ? Int(len) : 0
-    var out = [UInt8](repeating: 0, count: n)
-    if let ptr, n > 0 {
-        let src = ptr.assumingMemoryBound(to: UInt8.self)
-        for i in 0..<n { out[i] = src[i] }
-    }
-    return out
+    guard let ptr, n > 0 else { return [] }
+    return [UInt8](UnsafeRawBufferPointer(start: ptr, count: n))
 }
 
 private func channelDescriptor(_ bytes: [UInt8]) -> UnsafeMutableRawPointer {
     let length = bytes.count
     let buffer = UnsafeMutableRawPointer.allocate(byteCount: length > 0 ? length : 1, alignment: 1)
-    let dst = buffer.assumingMemoryBound(to: UInt8.self)
-    for i in 0..<length { dst[i] = bytes[i] }
+    bytes.withUnsafeBytes { source in
+        if length > 0 { buffer.copyMemory(from: source.baseAddress!, byteCount: length) }
+    }
     let desc = UnsafeMutableRawPointer.allocate(byteCount: 8, alignment: 4)
     desc.storeBytes(of: UInt32(truncatingIfNeeded: UInt(bitPattern: buffer)), toByteOffset: 0, as: UInt32.self)
     desc.storeBytes(of: UInt32(truncatingIfNeeded: length), toByteOffset: 4, as: UInt32.self)

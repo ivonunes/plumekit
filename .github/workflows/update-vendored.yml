@@ -1,0 +1,143 @@
+name: Update vendored dependencies
+
+# Weekly check of the vendored ThirdParty/ upstreams (SQLite, zlib). When one
+# has a newer release, support/update-vendored.sh re-vendors it, the full test
+# suite runs against the result, and the diff lands as a PR on the fixed
+# `vendored-updates` branch — force-pushed and edited in place on later runs,
+# so there is never more than one open PR. The PR is raised even when the
+# tests fail (the body says so): a red run plus a red PR is the signal to look.
+#
+# PRs created with GITHUB_TOKEN don't trigger `on: pull_request` workflows
+# (GitHub's recursion guard), which is why the tests run here instead of
+# relying on test.yml.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-vendored
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check upstreams
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.apply.outputs.changed }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Apply updates
+        id: apply
+        run: |
+          support/update-vendored.sh
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # If main already carries everything (an update was merged or made by
+      # hand), a leftover open PR is stale — close it.
+      - name: Close stale PR
+        if: steps.apply.outputs.changed == 'false'
+        run: |
+          PR="$(gh pr list --head vendored-updates --state open --json number --jq '.[0].number' || true)"
+          if [ -n "$PR" ]; then
+            gh pr close "$PR" --comment "main already carries these updates." --delete-branch
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  test:
+    name: Test with updates
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.3
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Install system dependencies
+        run: apt-get update && apt-get install -y libpq-dev unzip
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v6
+        with:
+          path: .build
+          key: linux-swiftpm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            linux-swiftpm-
+
+      - name: Apply updates
+        run: support/update-vendored.sh
+
+      - name: Test
+        run: swift test
+
+  pr:
+    name: Raise PR
+    needs: [check, test]
+    if: always() && needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Apply updates
+        id: apply
+        run: |
+          {
+            echo "summary<<EOF"
+            support/update-vendored.sh
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push branch and create or update PR
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b vendored-updates
+          git add -A
+          git commit -m "Update vendored dependencies"
+          git push --force origin vendored-updates
+
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$TEST_RESULT" = "success" ]; then
+            TESTS="swift test passed on Linux with these updates applied ([run]($RUN_URL))."
+          else
+            TESTS="swift test FAILED on Linux with these updates applied — see the [run]($RUN_URL) before merging."
+          fi
+          {
+            echo "Vendored dependency updates found by the weekly check:"
+            echo
+            echo "$SUMMARY" | sed 's/^/- /'
+            echo
+            echo "$TESTS"
+          } > pr-body.md
+
+          PR="$(gh pr list --head vendored-updates --state open --json number --jq '.[0].number' || true)"
+          if [ -n "$PR" ]; then
+            gh pr edit "$PR" --body-file pr-body.md
+          else
+            gh pr create --title "Update vendored dependencies" --body-file pr-body.md --base main --head vendored-updates
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY: ${{ steps.apply.outputs.summary }}
+          TEST_RESULT: ${{ needs.test.result }}

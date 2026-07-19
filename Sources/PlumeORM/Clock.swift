@@ -1,16 +1,18 @@
 import _Concurrency
+import PlumeCore
 
-// The ORM's wall-clock seam, for auto-managed `createdAt`/`updatedAt`. Embedded
-// Swift has no wall clock (only a monotonic one via WASI), and PlumeORM is
-// Foundation-free, so the actual time source is INSTALLED per platform:
-//   • native  — PlumeServer installs a Foundation `Date`-based clock.
-//   • wasm    — the worker installs a `host_now` (JS `Date.now()`) clock.
-// A clock is a stateless process-wide function (not per-request state), so a
-// global is safe here — unlike the ambient Database, which would need a
-// per-request task-local (and @TaskLocal does not compile under embedded wasm).
+// The wall-clock seam itself lives in PlumeCore (`PlatformClock`) — auth sessions
+// need it too, and the installed source is one per process, not per subsystem.
+// This is a forwarding facade over that one storage, NOT a typealias: @Model's
+// generated `touchTimestamps` calls `ORMClock.now()` from files that import only
+// PlumeORM, and under Embedded a direct alias to a PlumeCore symbol fails to
+// compile there ("PlumeCore was not imported by this file").
 public enum ORMClock {
-    /// Epoch milliseconds. Defaults to 0 until a platform installs a real clock.
-    nonisolated(unsafe) public static var now: @Sendable () -> Int64 = { 0 }
+    /// Epoch milliseconds, read from (and installed into) `PlatformClock`.
+    public static var now: @Sendable () -> Int64 {
+        get { PlatformClock.now }
+        set { PlatformClock.now = newValue }
+    }
 }
 
 // ISO-8601 timestamps for schemas that store `created_at`/`updated_at` as TEXT (the

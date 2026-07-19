@@ -28,19 +28,6 @@ func exampleSessionManager(_ request: Request) async -> SessionManager? {
     return SessionManager(key: key, store: KVSessionStore(request.bindings.kv), now: authNowSeconds)
 }
 
-/// Identity middleware: resolve a principal from a bearer token or session cookie
-/// (only when one is present — anonymous requests pass straight through).
-func authIdentityMiddleware() -> MiddlewareFunction {
-    { request, next in
-        var req = request
-        if let token = extractBearerToken(request) ?? extractCookie(request, name: SessionCookie.name),
-           let manager = await exampleSessionManager(request) {
-            req.principal = await manager.resolve(token)
-        }
-        return try await next(req)
-    }
-}
-
 // A sample policy: only the owner may edit their account (ownership via the subject).
 struct AccountPolicy: Policy {
     enum Action { case view, edit }

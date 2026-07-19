@@ -25,14 +25,14 @@ import PlumeORM
         try await trash.softDelete(in: db)
 
         // Hidden from queries, counts, and find — but withTrashed sees everything.
-        #expect(try await Note.all().all(in: db).count == 1)
-        #expect(try await Note.all().count(in: db) == 1)
+        #expect(try await Note.all(in: db).count == 1)
+        #expect(try await Note.count(in: db) == 1)
         #expect(try await Note.find(trash.id, in: db) == nil)
         #expect(try await Note.withTrashed().all(in: db).count == 2)
         #expect(try await Note.onlyTrashed().all(in: db).first?.text == "trash")
 
         try await trash.restore(in: db)
-        #expect(try await Note.all().all(in: db).count == 2)
+        #expect(try await Note.all(in: db).count == 2)
         #expect(try await Note.find(trash.id, in: db)?.text == "trash")
     }
 

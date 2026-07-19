@@ -15,21 +15,57 @@ public protocol StorageDriver: DataStore {
     func delete(_ key: String) async throws
 }
 
+/// A driver that can also WRITE an object from a chunk stream without holding it
+/// in memory (the filesystem store appends to the file; S3 does a multipart
+/// upload). Drivers without this get a buffer-then-put fallback — resolved
+/// statically at `Storage.init` (no dynamic casts, Embedded-clean).
+public protocol StreamingStorageDriver: StorageDriver {
+    func put(_ key: String, from reader: RequestBodyReader) async throws
+}
+
 /// The concrete, Embedded-clean object-storage handle carried in `Context`.
 public struct Storage: Sendable {
     private let _get: @Sendable (String) async throws -> [UInt8]?
     private let _put: @Sendable (String, [UInt8]) async throws -> Void
+    private let _putStream: @Sendable (String, RequestBodyReader) async throws -> Void
     private let _delete: @Sendable (String) async throws -> Void
 
     public init(_ adapter: some StorageDriver) {
         self._get = { try await adapter.get($0) }
         self._put = { try await adapter.put($0, $1) }
         self._delete = { try await adapter.delete($0) }
+        // Fallback for a buffered-only driver: drain the stream, one put. (The
+        // Worker's replayed request bodies land here — they were already in memory.)
+        self._putStream = { key, reader in
+            var bytes: [UInt8] = []
+            while let chunk = try await reader.next() { bytes.append(contentsOf: chunk) }
+            try await adapter.put(key, bytes)
+        }
+    }
+
+    /// The overload streaming-capable drivers resolve to (statically, by type).
+    public init(_ adapter: some StreamingStorageDriver) {
+        self._get = { try await adapter.get($0) }
+        self._put = { try await adapter.put($0, $1) }
+        self._delete = { try await adapter.delete($0) }
+        self._putStream = { try await adapter.put($0, from: $1) }
     }
 
     public func get(_ key: String) async throws -> [UInt8]? { try await _get(key) }
     public func put(_ key: String, _ bytes: [UInt8]) async throws { try await _put(key, bytes) }
     public func delete(_ key: String) async throws { try await _delete(key) }
+
+    /// Write an object from a chunk stream — the sink for a streaming upload
+    /// route, so the payload never sits in memory whole on a capable driver:
+    ///
+    ///     app.post("/import", body: .streaming) { request in
+    ///         guard let reader = request.bodyReader else { return .status(400) }
+    ///         try await Storage.current.put("imports/latest.csv", from: reader)
+    ///         return .status(201)
+    ///     }
+    public func put(_ key: String, from reader: RequestBodyReader) async throws {
+        try await _putStream(key, reader)
+    }
 
     /// Serve a stored object as an HTTP response, or a 404 if it's missing. Pass the
     /// `contentType` explicitly (there's no extension inference here, so it behaves

@@ -55,6 +55,18 @@ public struct TestApp {
     }
 }
 
+extension TestApp {
+    /// Form POST with the harness's CSRF token appended automatically, so a
+    /// controller test is just the fields it cares about:
+    ///
+    ///     let response = await app.postForm("/posts", [("title", "Hello world")])
+    public func postForm(_ target: String, _ fields: [(String, String)],
+                         headers: Headers = Headers()) async -> Response {
+        await client.postForm(target, fields: fields + [(CSRF.fieldName, csrfToken)],
+                              headers: headers)
+    }
+}
+
 /// An in-memory KV for tests (native only).
 public func memoryKV() -> KV {
     let box = MemoryKVBox()

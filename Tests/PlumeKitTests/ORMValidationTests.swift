@@ -25,7 +25,7 @@ final class Account: Model {
 
     let ok = Account(username: "alice", age: 30)
     #expect(ok.validate().isEmpty)
-    try await ok.save(in: db)
+    #expect(try await ok.save(in: db).isEmpty)
     #expect(ok.id > 0)
 
     let bad = Account(username: "", age: -1)
@@ -42,7 +42,7 @@ final class Account: Model {
 @Test func uniquenessExcludesSelf() async throws {
     let db = try NativeDrivers.sqlite(path: ":memory:")
     try await Account.createTable(in: db)
-    try await Account(username: "bob", age: 20).save(in: db)
+    #expect(try await Account(username: "bob", age: 20).save(in: db).isEmpty)
 
     // A different row with the same username fails (errors returned, not persisted).
     let dupeErrors = try await Account(username: "bob", age: 25).save(in: db)
@@ -51,6 +51,6 @@ final class Account: Model {
     // Updating the SAME row keeps its username valid (excludes self).
     let bob = try await Account.where(Account.username == "bob").all(in: db).first!
     bob.age = 21
-    try await bob.save(in: db)
-    #expect(try await Account.all().count(in: db) == 1)
+    #expect(try await bob.save(in: db).isEmpty)
+    #expect(try await Account.count(in: db) == 1)
 }

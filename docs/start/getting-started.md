@@ -98,35 +98,23 @@ keeps them reusable as the app grows. See [Components](../components/index.md).
 
 The heart of the app is `buildApp()` in `Sources/App/App.swift`. **Both** entry
 points call it, so your routes behave identically on the native server and the
-Worker:
+Worker. `App.swift` sets up the middleware (logging, method override, CSRF,
+localization) and calls `registerRoutes(app)`; your routes live in
+`Sources/App/Routes.swift`:
 
 ```swift
-import PlumeCore
-import PlumeRuntime
-
-public func buildApp() -> Application {
-    let app = Application()
-
-    // Middleware: log every request through the platform log seam
-    // (console.log on Workers, stdout natively).
-    app.use { request, next in
-        let response = try await next(request)
-        request.context.log("\(request.method.name) \(request.path) -> \(response.status)")
-        return response
-    }
-
-    // The scaffold's front door renders the styled HomePage view with Plume; see
-    // "Rendering views with Plume" below. (`homePage`/`Item` are covered there.)
+// Sources/App/Routes.swift
+func registerRoutes(_ app: Application) {
+    // The front door: the welcome page, a Plume-rendered view.
     app.get("/") { _ in
-        .view(homePage(items: [Item(name: "alpha"), Item(name: "beta")]))
+        .view(homePage())
     }
 
+    // Path parameters bind by name:
     app.get("/hello/:name") { request in
         let name = request.parameters["name"] ?? "world"
         return .text("Hello, \(name)!")
     }
-
-    return app
 }
 ```
 
@@ -178,20 +166,8 @@ Enabling a capability generates a typed, non-optional accessor on
 `request.bindings`. Using a capability you have **not** declared is a *compile*
 error; there is no accessor for it.
 
-The database ORM lives in the `PlumeORM` module, so add it to the `App` target in
-`Package.swift`:
-
-```swift
-.target(
-    name: "App",
-    dependencies: [
-        .product(name: "PlumeCore", package: "PlumeKit"),
-        .product(name: "PlumeORM", package: "PlumeKit"),   // ← add this
-        .product(name: "PlumeRuntime", package: "PlumeKit"),
-    ],
-    plugins: [.plugin(name: "PlumeKitCodegen", package: "PlumeKit")]
-),
-```
+The database ORM lives in the `PlumeORM` module, which the scaffold's `App`
+target already depends on, so `import PlumeORM` just works.
 
 Natively, the `sqlite` driver stores the database under `.plumekit/app.db`; on
 Cloudflare the same code runs against a bound D1 database. Your app code is
@@ -331,8 +307,9 @@ emits a deployable bundle in `dist/cloudflare/` (the `app.wasm` module, a
 dependency-free `worker.mjs` bridging host bindings, and a `wrangler.toml`). The
 routes you tested natively now run at the edge, byte-for-byte the same.
 
-Your `wrangler.toml` is yours to customise (bindings, routes, custom domains,
-logging); build writes one on first run and reuses your copy afterwards. See
+The `dist/cloudflare/wrangler.toml` is **generated from plumekit.toml on every
+build**, so don't edit it in place: change `plumekit.toml` (capabilities,
+bindings, database name) and rebuild. See
 [Deploying](../deploying.md) for the full workflow (Cloudflare, AWS, containers and
 CI), and [Portability](../portability.md) for how the targets stay in lockstep.
 
@@ -351,12 +328,12 @@ install), and the scaffold's `/` handler calls the generated render function:
 
 ```swift
 app.get("/") { _ in
-    let items = [Item(name: "alpha"), Item(name: "Hello & <World>")]
-    return .view(homePage(items: items))   // homePage(...) is generated from HomePage.plume
+    .view(homePage())   // homePage(into:) is generated from HomePage.plume
 }
 ```
 
-`{item.name}` is HTML-escaped by default, so `Hello & <World>` renders safely.
+Dynamic values in a template (`{title}` and friends) are HTML-escaped by
+default, so `Hello & <World>` renders safely.
 
 `Views/Layout.plume` declares `@navigation(root: "body", viewTransitions: true,
 scroll: "top")`, so client-side navigation is on by default. The runtime `<script>`

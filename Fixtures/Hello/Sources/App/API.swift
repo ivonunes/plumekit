@@ -30,7 +30,7 @@ func registerAPIRoutes(_ app: Application) {
         try await Post.createTable(in: db)
         let limit = min(Int(request.queryParams["limit"] ?? "") ?? 20, 100)
         let offset = Int(request.queryParams["offset"] ?? "") ?? 0
-        let page = try await Post.all().order(by: Post.id).paginate(limit: limit, offset: offset, in: db)
+        let page = try await Post.query().order(by: Post.id).paginate(limit: limit, offset: offset, in: db)
         return .json(paginatedJSON(page.items.map { $0.apiJSON() },
                                    limit: page.limit, offset: page.offset, hasMore: page.hasMore))
     }

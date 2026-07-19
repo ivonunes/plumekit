@@ -139,19 +139,9 @@ extension MultipartForm {
     }
 }
 
-// Minimal percent-encoding (so multipart field values round-trip through FormParams).
-private func percentEncode(_ string: String) -> [UInt8] { percentEncode(Array(string.utf8)) }
-private func percentEncode(_ bytes: [UInt8]) -> [UInt8] {
-    var out: [UInt8] = []
-    let hex = Array("0123456789ABCDEF".utf8)
-    for b in bytes {
-        let unreserved = (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)
-            || (b >= 0x30 && b <= 0x39) || b == 0x2D || b == 0x2E || b == 0x5F || b == 0x7E
-        if unreserved { out.append(b) }
-        else { out.append(0x25); out.append(hex[Int(b >> 4)]); out.append(hex[Int(b & 0xF)]) }
-    }
-    return out
-}
+// Minimal percent-encoding (so multipart field values round-trip through
+// FormParams) — the byte-level encoder is the shared `percentEncode` in Bytes.swift.
+private func percentEncode(_ string: String) -> [UInt8] { PlumeCore.percentEncode(Array(string.utf8)) }
 
 // MARK: - Byte helpers
 

@@ -69,11 +69,20 @@ app.group("/admin", middleware: [requireAuth()]) { admin in
 }
 ```
 
-It needs `identityMiddleware` earlier in the chain (that resolves the principal). A
-browser request is redirected to `/login` (pass `requireAuth(redirectTo:)` to change
-it); a request carrying a bearer token gets a `401` instead of a redirect it can't
-follow. For finer control inside a handler, use `request.isAuthenticated` /
-`requireAuthenticated()` directly.
+It needs `identityMiddleware` earlier in the chain (that resolves the principal).
+The installable form builds everything from the request's bindings — the signing
+key from the `AUTH_SECRET` secret, sessions in KV — so wiring it is one line in
+`buildApp()`:
+
+```swift
+app.use(identityMiddleware())          // AUTH_SECRET + KV; pass secretName: to rename
+```
+
+(The `identityMiddleware(_ manager:)` overload takes a ready `SessionManager` when
+you build your own.) A browser request is redirected to `/login` (pass
+`requireAuth(redirectTo:)` to change it); a request carrying a bearer token gets a
+`401` instead of a redirect it can't follow. For finer control inside a handler,
+use `request.isAuthenticated` / `requireAuthenticated()` directly.
 
 ## Email verification (scaffolded)
 

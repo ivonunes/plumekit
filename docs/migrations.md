@@ -103,8 +103,16 @@ part of a deploy, controlled by the `[deploy]` section of `plumekit.toml`.
 
 ### Rollback and status
 
-Rolling back is a Swift API on the `Migrator` (the pending set is `plumeKitMigrations`,
-the generated list of your migration files):
+Both are CLI commands against the native database:
+
+```sh
+plumekit migrate --status        # each migration:  up/down
+plumekit migrate --rollback      # reverse the most recent (its down:)
+plumekit migrate --rollback 3    # reverse the last three
+```
+
+The same operations exist as Swift APIs on the `Migrator` (the set is
+`plumeKitMigrations`, the generated list of your migration files):
 
 ```swift
 let migrator = Migrator(plumeKitMigrations)
@@ -112,7 +120,16 @@ try await migrator.rollback(in: db, steps: 1)   // reverse the most recent, runn
 let states = try await migrator.status(in: db)  // each migration and whether it's applied
 ```
 
-A migration with no `down` throws `MigrationError.irreversible`.
+A migration with no `down` throws `MigrationError.irreversible`. Each migration
+and its ledger row are applied (and rolled back) in one transaction on the native
+drivers, so a failed script leaves nothing half-applied. D1 is forward-only: to
+undo something there, write a new migration.
+
+Statements Postgres refuses inside a transaction block (`CREATE INDEX
+CONCURRENTLY`, `VACUUM`) go in a migration marked `transactional: false`
+(`Migration(version:transactional:up:down:)` or
+`Migration.sql(version:transactional:up:down:)`). Keep those to one statement:
+without the wrapper, a mid-script failure leaves whatever ran behind.
 
 ### Adopting an existing database
 
@@ -140,7 +157,7 @@ plumekit generate seeder Posts
 import PlumeORM
 
 let postsSeeder = Seeder { _ in
-    try await Post(title: "Welcome", views: 0, published: true).upsert()
+    _ = try await Post(title: "Welcome", views: 0, published: true).upsert()
 }
 ```
 

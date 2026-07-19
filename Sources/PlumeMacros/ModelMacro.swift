@@ -16,7 +16,7 @@ private struct ColumnPlan {
     let decode: (Int) -> String
     let encode: String
 }
-private struct HasManyPlan { let name: String; let foreignKey: String }
+private struct HasManyPlan { let name: String; let related: String; let foreignKey: String }
 private struct InitParam { let decl: String; let assign: String }
 
 // The @Model member macro. Reads the model class at COMPILE time (the Embedded
@@ -113,11 +113,12 @@ public struct ModelMacro: MemberMacro {
                     decode: { "self.$\(name) = BelongsTo(key: row.value(\($0)))" },
                     encode: nullable ? "sqlForeignKeyOptional(self.$\(name).resolvedKey)" : "self.$\(name).resolvedKey"))
                 initParams.append(InitParam(decl: "\(name): \(related)? = nil", assign: "self.\(name) = \(name)"))
-            case .hasMany(_, let fkOverride):
+            case .hasMany(let related, let fkOverride):
                 // A database-first child may name its FK column something other than
                 // `<owner>_id` (via @BelongsTo(foreignKey:)); `@HasMany(foreignKey:)`
                 // names it on this side so the reverse query hits the right column.
-                hasManys.append(HasManyPlan(name: field.name, foreignKey: fkOverride ?? ownerForeignKey))
+                hasManys.append(HasManyPlan(name: field.name, related: related,
+                                            foreignKey: fkOverride ?? ownerForeignKey))
             }
         }
 
@@ -280,6 +281,23 @@ public struct ModelMacro: MemberMacro {
         // The PK column's type, so a child's @BelongsTo FK column can mirror it.
         let primaryKeyColumnTypeDecl: DeclSyntax = "public static let primaryKeyColumnType: ColumnType = .\(raw: primaryKeyColumnType)"
 
+        // 6d. typed eager-load helpers, one per has-many: `Post.preloadComments(posts)`
+        // batches the children of every post in ONE query and fills `$comments`. The
+        // macro supplies the FK name and the assignment, so the stringly-typed
+        // `eagerLoad(foreignKey:assign:)` seam can't be misused from app code.
+        var preloadDecls: [DeclSyntax] = []
+        for r in hasManys {
+            let helper = "preload" + upperFirst(r.name)
+            preloadDecls.append("""
+            public static func \(raw: helper)(_ owners: [\(raw: typeName)], in db: Database? = nil) async throws {
+                try await eagerLoad(owners, foreignKey: "\(raw: r.foreignKey)",
+                                    assign: { (owner: \(raw: typeName), children: [\(raw: r.related)]) in
+                                        owner.$\(raw: r.name).cached = children
+                                    }, in: db)
+            }
+            """)
+        }
+
         // 7. typed query columns (keyed by the SWIFT property name for ergonomic
         // predicates: `Order.quantity == 5`; the stored string is the SQL column).
         var columnConsts: [DeclSyntax] = []
@@ -292,7 +310,7 @@ public struct ModelMacro: MemberMacro {
             snapshot, takeSnapshot, changed,
             persistedStorage, isPersistedDecl, markPersistedDecl, markNewDecl, dbGeneratedDecl, setGeneratedIDDecl,
             refresh, touch, createdAtColumnDecl, primaryKeyValueDecl, primaryKeyColumnTypeDecl,
-        ] + columnConsts
+        ] + preloadDecls + columnConsts
     }
 }
 
@@ -580,6 +598,13 @@ private func isASCIILower(_ byte: UInt8) -> Bool { byte >= 0x61 && byte <= 0x7a 
 private func isASCIIDigit(_ byte: UInt8) -> Bool { byte >= 0x30 && byte <= 0x39 }
 
 /// Naive English pluraliser for table names. Host-side only.
+/// `comments` → `Comments`, for the generated `preloadComments` helper name.
+/// (The macro runs on the host, so plain String APIs are fine here.)
+func upperFirst(_ name: String) -> String {
+    guard let first = name.first else { return name }
+    return first.uppercased() + name.dropFirst()
+}
+
 func pluralize(_ word: String) -> String {
     if word.hasSuffix("y"), let last = word.dropLast().last, !"aeiou".contains(last) {
         return word.dropLast() + "ies"

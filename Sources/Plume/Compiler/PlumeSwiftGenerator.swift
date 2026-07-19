@@ -43,6 +43,9 @@ struct PlumeSwiftGenerator {
 
     private var output = ""
     private var indentationLevel = 0
+    /// Static chrome bytes emitted while lowering the CURRENT component — the basis
+    /// for the returning overload's buffer reservation. Reset per component.
+    private var literalBytesEmitted = 0
     private var uniqueCounter = 0
     /// Scope attribute names applied to opening tags in the component currently
     /// being lowered (one per scoped `@style` it declares). Empty when none.
@@ -110,6 +113,7 @@ struct PlumeSwiftGenerator {
 
     private mutating func lowerComponent(_ component: PlumeComponent) throws {
         let signature = try componentSignature(component)
+        literalBytesEmitted = 0
         line(signature + " {")
         indentationLevel += 1
 
@@ -155,7 +159,11 @@ struct PlumeSwiftGenerator {
         let call = forwarded.isEmpty ? "\(name)(into: &out)" : "\(name)(\(forwarded.joined(separator: ", ")), into: &out)"
         line("func \(name)(\(parameters.joined(separator: ", "))) -> HTML {")
         indentationLevel += 1
-        line("var out = HTML()")
+        // Reserve from the component's static chrome (counted during lowering), with
+        // half again as headroom for dynamic values — a page then renders into one
+        // allocation instead of growing through reallocation-copies.
+        let reserve = max(256, literalBytesEmitted + literalBytesEmitted / 2)
+        line("var out = HTML(reservingCapacity: \(reserve))")
         line(call)
         line("return out")
         indentationLevel -= 1
@@ -253,6 +261,7 @@ struct PlumeSwiftGenerator {
         guard !text.isEmpty else { return }
         let emitted = activeScopeAttributes.isEmpty
             ? text : Self.applyScopeAttributes(to: text, attributes: activeScopeAttributes)
+        literalBytesEmitted += emitted.utf8.count
         line("out.literal(\(swiftStringLiteral(emitted)))")
     }
 

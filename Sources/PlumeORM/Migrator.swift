@@ -28,13 +28,21 @@ public enum MigrationError: Error, Sendable {
 /// "0001_initial_schema" or "20260703_120000_add_widgets".
 public struct Migration: Sendable {
     public let version: String
+    /// Whether the Migrator wraps this migration (and its ledger row) in a
+    /// transaction. Leave true; set false only for statements the database forbids
+    /// inside a transaction block (Postgres `CREATE INDEX CONCURRENTLY`, `VACUUM`) —
+    /// Rails' `disable_ddl_transaction!` equivalent. A non-transactional migration
+    /// that fails mid-script can leave partial DDL behind, so keep them one-statement.
+    public let transactional: Bool
     public let up: @Sendable (Database) async throws -> Void
     public let down: (@Sendable (Database) async throws -> Void)?
 
     public init(version: String,
+                transactional: Bool = true,
                 up: @escaping @Sendable (Database) async throws -> Void,
                 down: (@Sendable (Database) async throws -> Void)? = nil) {
         self.version = version
+        self.transactional = transactional
         self.up = up
         self.down = down
     }
@@ -42,7 +50,8 @@ public struct Migration: Sendable {
     /// The common case: a migration whose up/down are SQL scripts. Multiple
     /// `;`-separated statements run in order; `--` line comments are ignored. This
     /// is all an app needs to hand-author a full-fidelity schema.
-    public static func sql(version: String, up: String, down: String? = nil) -> Migration {
+    public static func sql(version: String, transactional: Bool = true,
+                           up: String, down: String? = nil) -> Migration {
         let runUp: @Sendable (Database) async throws -> Void = { db in
             for statement in splitSQLStatements(up) { _ = try await db.query(statement, []) }
         }
@@ -52,7 +61,7 @@ public struct Migration: Sendable {
                 for statement in splitSQLStatements(down) { _ = try await db.query(statement, []) }
             }
         }
-        return Migration(version: version, up: runUp, down: runDown)
+        return Migration(version: version, transactional: transactional, up: runUp, down: runDown)
     }
 }
 
@@ -80,15 +89,30 @@ public struct Migrator: Sendable {
     public func migrate(in db: Database, adoptExistingTable: String? = nil) async throws -> [String] {
         try await ensureLedger(in: db)
         let ordered = sortedMigrations()
-        if let table = adoptExistingTable, try await ledgerIsEmpty(in: db),
+        let alreadyApplied = try await appliedVersions(in: db)   // one SELECT for the whole run
+        if let table = adoptExistingTable, alreadyApplied.isEmpty,
            try await introspectColumns(table: table, in: db).isEmpty == false {
             for m in ordered { try await markApplied(m.version, in: db) }
             return []
         }
         var applied: [String] = []
-        for m in ordered where try await isApplied(m.version, in: db) == false {
-            try await m.up(db)
-            try await markApplied(m.version, in: db)
+        for m in ordered where versionInLedger(m.version, alreadyApplied) == false {
+            // Each migration + its ledger row commit together, so a crash mid-script
+            // can't leave half-applied DDL that a re-run would re-execute. D1 has no
+            // interactive transactions — but it never reaches here (its migrations go
+            // through `pendingMigrationSQL`); the guard keeps any transactionless
+            // backend on the old sequential behaviour instead of trapping. A migration
+            // can opt out (`transactional: false`) for statements Postgres forbids in
+            // a transaction block (CREATE INDEX CONCURRENTLY and friends).
+            if m.transactional, db.supportsInteractiveTransactions {
+                try await db.transaction { tx in
+                    try await m.up(tx)
+                    try await markApplied(m.version, in: tx)
+                }
+            } else {
+                try await m.up(db)
+                try await markApplied(m.version, in: db)
+            }
             applied.append(m.version)
         }
         return applied
@@ -98,10 +122,11 @@ public struct Migrator: Sendable {
     @discardableResult
     public func rollback(in db: Database, steps: Int = 1) async throws -> [String] {
         try await ensureLedger(in: db)
+        let alreadyApplied = try await appliedVersions(in: db)
         var reverted: [String] = []
         for m in sortedMigrations().reversed() {
             if reverted.count >= steps { break }
-            if try await isApplied(m.version, in: db) {
+            if versionInLedger(m.version, alreadyApplied) {
                 guard let down = m.down else {
                     #if hasFeature(Embedded)
                     return reverted   // migrations never run in the guest; keeps the type embedded-clean
@@ -109,8 +134,16 @@ public struct Migrator: Sendable {
                     throw MigrationError.irreversible(m.version)
                     #endif
                 }
-                try await down(db)
-                try await markReverted(m.version, in: db)
+                // Mirror `migrate`: the down script and its ledger delete are atomic.
+                if m.transactional, db.supportsInteractiveTransactions {
+                    try await db.transaction { tx in
+                        try await down(tx)
+                        try await markReverted(m.version, in: tx)
+                    }
+                } else {
+                    try await down(db)
+                    try await markReverted(m.version, in: db)
+                }
                 reverted.append(m.version)
             }
         }
@@ -120,8 +153,9 @@ public struct Migrator: Sendable {
     /// Each migration and whether it has been applied (in order).
     public func status(in db: Database) async throws -> [(version: String, applied: Bool)] {
         try await ensureLedger(in: db)
+        let alreadyApplied = try await appliedVersions(in: db)
         var out: [(version: String, applied: Bool)] = []
-        for m in sortedMigrations() { out.append((m.version, try await isApplied(m.version, in: db))) }
+        for m in sortedMigrations() { out.append((m.version, versionInLedger(m.version, alreadyApplied))) }
         return out
     }
 
@@ -143,14 +177,20 @@ private func ensureLedger(in db: Database) async throws {
         + " (version TEXT PRIMARY KEY, applied_at " + appliedAtType + ")", [])
 }
 
-private func ledgerIsEmpty(in db: Database) async throws -> Bool {
-    try await db.query("SELECT 1 FROM " + migratorLedger + " LIMIT 1", []).rows.isEmpty
+/// Every version in the ledger, read once per run — not one probe per migration.
+private func appliedVersions(in db: Database) async throws -> [String] {
+    let result = try await db.query("SELECT version FROM " + migratorLedger, [])
+    var out: [String] = []
+    for row in result.rows where row.isEmpty == false {
+        if case .text(let version) = row[0] { out.append(version) }
+    }
+    return out
 }
 
-private func isApplied(_ version: String, in db: Database) async throws -> Bool {
-    try await db.query(
-        "SELECT 1 FROM " + migratorLedger + " WHERE version = ? LIMIT 1",
-        [sqlText(version)]).rows.isEmpty == false
+/// Byte-wise membership — never `String ==` on a version (the Unicode Link Law).
+private func versionInLedger(_ version: String, _ applied: [String]) -> Bool {
+    for a in applied where asciiEqual(a, version) { return true }
+    return false
 }
 
 private func markApplied(_ version: String, in db: Database, at now: Int64 = ORMClock.now()) async throws {
@@ -221,7 +261,7 @@ extension Migrator {
 
         try await ensureLedger(in: db)                  // captures the ledger CREATE
         var pending: [String] = []
-        for m in sortedMigrations() where isVersionApplied(m.version, in: appliedVersions) == false {
+        for m in sortedMigrations() where versionInLedger(m.version, appliedVersions) == false {
             try await m.up(db)                          // captures the migration's real DDL/DML
             try await markApplied(m.version, in: db, at: now)   // captures the ledger INSERT
             pending.append(m.version)
@@ -241,12 +281,6 @@ extension Migrator {
 private final class MigrationSQLRecorder: @unchecked Sendable {
     var statements: [(sql: String, params: [SQLValue])] = []
     func record(_ sql: String, _ params: [SQLValue]) { statements.append((sql, params)) }
-}
-
-/// Byte-wise membership — never `String ==` on a version (the Unicode Link Law).
-private func isVersionApplied(_ version: String, in applied: [String]) -> Bool {
-    for a in applied where asciiEqual(a, version) { return true }
-    return false
 }
 
 /// Inline positional `?` placeholders with their bound values as SQL literals so a
@@ -388,14 +422,4 @@ private func appendTrimmed(_ out: inout [String], _ bytes: [UInt8]) {
 }
 
 private func isSQLSpace(_ b: UInt8) -> Bool { b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D }
-
-private func asciiLess(_ a: String, _ b: String) -> Bool {
-    let x = Array(a.utf8)
-    let y = Array(b.utf8)
-    var i = 0
-    while i < x.count, i < y.count {
-        if x[i] != y[i] { return x[i] < y[i] }
-        i += 1
-    }
-    return x.count < y.count
-}
+// (version ordering uses PlumeCore's shared byte-wise `asciiLess`)

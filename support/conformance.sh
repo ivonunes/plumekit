@@ -5,7 +5,7 @@
 # the live contract (auth, API, realtime) AND the sync hooks. It is
 # the executable form of docs/wire-protocol.md.
 #
-# Usage: scripts/conformance.sh [base-url]
+# Usage: support/conformance.sh [base-url]
 #   With no arg, it builds + starts the native example server and tears it down.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -67,9 +67,22 @@ TOKEN2=$(curl -s -H "$J" -H 'accept: application/json' -d '{"email":"d@x.com","p
 OTHER=$(curl -s -H "authorization: Bearer $TOKEN2" "$S?since=0")
 if printf '%s' "$OTHER" | grep -qF '"n1"'; then FAIL=$((FAIL+1)); echo "  FAIL scope isolates other users' records"; else PASS=$((PASS+1)); echo "  ok   scope isolates other users' records"; fi
 
+echo "== streaming bodies =="
+check "streamed response delivers every chunk" "$(curl -s "$BASE/stream/count")" "chunk-5"
+check "streamed response is chunked-framed" \
+  "$(curl -s -D - -o /dev/null "$BASE/stream/count")" "transfer-encoding: chunked"
+# 40 MB is past the buffered-body cap (32 MB): only an unbuffered streaming route
+# can take it. The bearer header exempts the raw POST from the CSRF form check.
+BIG=$(head -c 40000000 /dev/zero | curl -s --data-binary @- -H 'content-type: application/octet-stream' \
+  -H "authorization: Bearer $TOKEN" "$BASE/upload/stream")
+check "streamed upload passes the buffered cap" "$BIG" "received 40000000 bytes"
+STORED=$(head -c 6000000 /dev/zero | curl -s --data-binary @- -H 'content-type: application/octet-stream' \
+  -H "authorization: Bearer $TOKEN" "$BASE/upload/store")
+check "streamed upload lands whole in storage" "$STORED" "stored 6000000 bytes"
+
 echo "== realtime (signed subscribe, payload kinds, stream action, resync) =="
 if command -v node >/dev/null 2>&1; then
-  RT=$(node "$ROOT/scripts/conformance-ws.mjs" 8190 2>/dev/null)
+  RT=$(node "$ROOT/support/conformance-ws.mjs" 8190 2>/dev/null)
   check "fragment subscriber gets HTML fragment"  "$RT" "FRAGMENT:<li>"
   check "payload subscriber gets typed JSON"      "$RT" 'PAYLOAD:{"n"'
   check "forged token rejected"                   "$RT" "FORGED:rejected"

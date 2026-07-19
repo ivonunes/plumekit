@@ -5,7 +5,14 @@ import Foundation
 // controllers and views. Identity resolves identically for browser sessions (a signed
 // cookie) and API clients (a bearer token), so the same routes serve both. Built on the
 // framework's auth primitives (PasswordAuthenticator, SessionManager, identityMiddleware).
-// Requires the `kv` and `database` capabilities.
+
+/// What the generated scaffold needs to run: sessions live in KV, credentials in
+/// the database, and AUTH_SECRET comes through the secrets binding
+/// (`Secrets.current` traps when unbound — the first login would kill the server).
+/// Declared next to the templates that create the requirement; the generate
+/// command gates on it.
+let authRequiredCapabilities = ["kv", "database", "secrets"]
+
 func generateAuth() -> Int32 {
     let files: [(path: String, label: String, contents: String)] = [
         ("Sources/App/Models/User.swift", "model", userModel),
@@ -59,7 +66,8 @@ func generateAuth() -> Int32 {
     print("")
     print("  Auth scaffold generated. To finish wiring it up:")
     print("")
-    print("  1. Enable the `kv` and `database` capabilities in plumekit.toml.")
+    print("  1. Enable the `kv`, `database` and `secrets` capabilities in plumekit.toml")
+    print("     (secrets backs AUTH_SECRET — without it the first login crashes the server).")
     print("  2. Call installAuth(app) in buildApp() (registers the identity middleware + routes).")
     print("  3. Set AUTH_SECRET (wrangler secret put AUTH_SECRET, or your env) before deploying.")
     print("  4. Run `plumekit migrate` — the migration is picked up automatically.")
@@ -139,7 +147,7 @@ func authSigningKey() async -> [UInt8] {
 struct UserStore: CredentialStore {
     func ensureTable() async throws {}   // the `users` table is created by your migration
     func findCredential(email: String) async throws -> (subject: String, passwordHash: String)? {
-        guard let user = try await User.where(User.email == email).all().first else { return nil }
+        guard let user = try await User.where(User.email == email).first() else { return nil }
         return (String(user.id), user.passwordHash)
     }
     func createCredential(email: String, passwordHash: String) async throws -> String {
@@ -222,11 +230,11 @@ struct AuthController {
 
     func verify(_ request: Request) async throws -> Response {
         let token = request.queryParams["token"] ?? ""
-        guard let verification = try await EmailVerification.where(EmailVerification.token == token).all().first,
+        guard let verification = try await EmailVerification.where(EmailVerification.token == token).first(),
               verification.expiresAt > Int(ORMClock.now() / 1000) else {
             return fail(request, "Invalid or expired verification link", 400)
         }
-        guard let user = try await User.where(User.email == verification.email).all().first else {
+        guard let user = try await User.where(User.email == verification.email).first() else {
             return fail(request, "No such account", 404)
         }
         user.verifiedAt = Int(ORMClock.now() / 1000)
@@ -238,7 +246,7 @@ struct AuthController {
 
     func resendVerification(_ request: Request) async throws -> Response {
         let email = field(request, "email")
-        if try await User.where(User.email == email).all().first != nil {
+        if try await User.where(User.email == email).first() != nil {
             try await sendVerificationEmail(email, request: request)
         }
         if request.wantsJSON { return .json("{\"ok\":true}") }
@@ -281,11 +289,11 @@ struct AuthController {
     func reset(_ request: Request) async throws -> Response {
         let posted = field(request, "token")
         let token = posted.isEmpty ? (request.queryParams["token"] ?? "") : posted
-        guard let reset = try await PasswordReset.where(PasswordReset.token == token).all().first,
+        guard let reset = try await PasswordReset.where(PasswordReset.token == token).first(),
               reset.expiresAt > Int(ORMClock.now() / 1000) else {
             return fail(request, "Invalid or expired reset token", 400)
         }
-        guard let user = try await User.where(User.email == reset.email).all().first else {
+        guard let user = try await User.where(User.email == reset.email).first() else {
             return fail(request, "No such account", 404)
         }
         let newPassword = field(request, "password")

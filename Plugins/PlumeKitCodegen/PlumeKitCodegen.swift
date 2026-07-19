@@ -66,11 +66,18 @@ struct PlumeKitCodegen: BuildToolPlugin {
             if FileManager.default.fileExists(atPath: schedules.path) { inputs.append(schedules) }
         }
 
+        // Which driver products this target actually links — the generator turns a
+        // capability that needs a missing driver into a clear `#error` (with the
+        // Package.swift line to add) instead of a bare "no such module" failure.
+        var linked: [String] = []
+        for product in ["PlumePostgres", "PlumeS3"] where dependsOn(product) { linked.append(product) }
+
         return [
             .buildCommand(
                 displayName: "PlumeKitCodegen \(kind) → \(target.name)",
                 executable: tool.url,
-                arguments: [manifest.path, context.pluginWorkDirectoryURL.path, kind],
+                arguments: [manifest.path, context.pluginWorkDirectoryURL.path, kind,
+                            "linked=" + linked.joined(separator: ",")],
                 inputFiles: inputs,
                 outputFiles: outputs
             )

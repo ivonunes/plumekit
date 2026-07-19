@@ -40,6 +40,33 @@ private func hexNibble(_ byte: UInt8) -> Int? {
     }
 }
 
+/// Byte-wise `<` between strings (no Unicode `String <`, which doesn't link under
+/// Embedded). Sorts locale tags, migration versions, translation keys.
+public func asciiLess(_ a: String, _ b: String) -> Bool {
+    let x = Array(a.utf8), y = Array(b.utf8)
+    var i = 0
+    while i < x.count, i < y.count {
+        if x[i] != y[i] { return x[i] < y[i] }
+        i += 1
+    }
+    return x.count < y.count
+}
+
+/// Percent-encode bytes (RFC 3986 unreserved set kept verbatim), byte-wise. The
+/// one encoder behind multipart round-tripping and the test client's form
+/// encoding — the decode side is `FormParams`, which accepts `%XX` and `+` alike.
+public func percentEncode(_ bytes: [UInt8]) -> [UInt8] {
+    var out: [UInt8] = []
+    let hex = Array("0123456789ABCDEF".utf8)
+    for b in bytes {
+        let unreserved = (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)
+            || (b >= 0x30 && b <= 0x39) || b == 0x2D || b == 0x2E || b == 0x5F || b == 0x7E
+        if unreserved { out.append(b) }
+        else { out.append(0x25); out.append(hex[Int(b >> 4)]); out.append(hex[Int(b & 0xF)]) }
+    }
+    return out
+}
+
 /// Split a byte buffer on a separator byte (no `String.split`; it doesn't link under Embedded).
 public func splitOnByte(_ bytes: [UInt8], _ separator: UInt8) -> [[UInt8]] {
     var out: [[UInt8]] = []

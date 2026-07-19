@@ -209,8 +209,29 @@ public struct HTML {
 
     mutating func appendJSONString(_ value: String) {
         bytes.append(PlumeASCII.doubleQuote)
-        for byte in value.utf8 { appendJSONByte(byte) }
+        // Copy clean runs in bulk; escape only at the bytes that need it (same
+        // pattern as `appendEscaped` below).
+        let contiguous: Void? = value.utf8.withContiguousStorageIfAvailable { buffer in
+            var start = 0
+            for i in 0..<buffer.count where Self.needsJSONEscape(buffer[i]) {
+                if start < i { bytes.append(contentsOf: UnsafeBufferPointer(rebasing: buffer[start..<i])) }
+                appendJSONByte(buffer[i])
+                start = i + 1
+            }
+            if start < buffer.count {
+                bytes.append(contentsOf: UnsafeBufferPointer(rebasing: buffer[start...]))
+            }
+        }
+        if case .none = contiguous {
+            for byte in value.utf8 { appendJSONByte(byte) }
+        }
         bytes.append(PlumeASCII.doubleQuote)
+    }
+
+    @inline(__always)
+    static func needsJSONEscape(_ byte: UInt8) -> Bool {
+        byte < 0x20 || byte == PlumeASCII.doubleQuote || byte == PlumeASCII.backslash
+            || byte == PlumeASCII.lessThan
     }
 
     @inline(__always)
@@ -242,14 +263,45 @@ public struct HTML {
 
     // MARK: - Byte-wise escaping
 
+    // Most dynamic text contains no escapable byte at all, so the fast path scans
+    // for the next `& < > " '` and bulk-appends the clean run as one slice instead
+    // of pushing bytes one at a time (an append per byte means a capacity +
+    // uniqueness check per byte — it dominates renders of content-heavy pages).
+
     @inline(__always)
     mutating func appendEscaped(_ utf8: String.UTF8View) {
-        for byte in utf8 { appendEscapedByte(byte) }
+        let contiguous: Void? = utf8.withContiguousStorageIfAvailable { appendEscaped($0) }
+        if case .none = contiguous {
+            for byte in utf8 { appendEscapedByte(byte) }
+        }
     }
 
     @inline(__always)
     mutating func appendEscaped(_ utf8: Substring.UTF8View) {
-        for byte in utf8 { appendEscapedByte(byte) }
+        let contiguous: Void? = utf8.withContiguousStorageIfAvailable { appendEscaped($0) }
+        if case .none = contiguous {
+            for byte in utf8 { appendEscapedByte(byte) }
+        }
+    }
+
+    @inline(__always)
+    mutating func appendEscaped(_ buffer: UnsafeBufferPointer<UInt8>) {
+        var start = 0
+        for i in 0..<buffer.count where Self.needsHTMLEscape(buffer[i]) {
+            if start < i { bytes.append(contentsOf: UnsafeBufferPointer(rebasing: buffer[start..<i])) }
+            appendEscapedByte(buffer[i])
+            start = i + 1
+        }
+        if start < buffer.count {
+            bytes.append(contentsOf: UnsafeBufferPointer(rebasing: buffer[start...]))
+        }
+    }
+
+    @inline(__always)
+    static func needsHTMLEscape(_ byte: UInt8) -> Bool {
+        byte == PlumeASCII.ampersand || byte == PlumeASCII.lessThan
+            || byte == PlumeASCII.greaterThan || byte == PlumeASCII.doubleQuote
+            || byte == PlumeASCII.singleQuote
     }
 
     @inline(__always)

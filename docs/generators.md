@@ -61,7 +61,7 @@ The scaffold wires in the conveniences you'd otherwise add by hand:
   (`PostRoutes.show.path(item.id)`). See [Routing](routing.md#named-routes).
 - **Validation with re-render**: `create` validates the input (`.required` on
   every field, plus `.integer`/`.decimal` for numeric ones); on failure it
-  re-renders the index with status 422, the submitted values repopulated
+  re-renders the New form with status 422, the submitted values repopulated
   (`value="{oldTitle}"`) and an inline `<span class="field-error">` message per
   field via `input.errors.first("title")`. See [Forms](forms.md).
 - **Flash messages**: create/update/destroy redirect with
@@ -95,7 +95,8 @@ verify**), the four page views in `Views/Auth/`, and the two email bodies in
 `Views/Emails/` (verification + password reset; emails are their own kind of view,
 so they get their own folder). It prints the migrations and the wiring steps:
 
-1. Enable the `kv` and `database` capabilities in `plumekit.toml`.
+1. Enable the `kv`, `database` and `secrets` capabilities in `plumekit.toml`
+   (secrets backs `AUTH_SECRET`; the generator offers to flip them for you).
 2. Call `installAuth(app)` in `buildApp()`; it registers the identity middleware and
    the routes (`/register`, `/login`, `/logout`, `/forgot`, `/reset`, plus
    `GET /verify` and `POST /verify/resend`).
@@ -158,7 +159,7 @@ Each writes one file and prints how to wire it:
 plumekit generate controller Post       # → app.resources("posts", PostController())
 plumekit generate view Sidebar          # → Views/Sidebar.plume
 plumekit generate middleware RateLimit  # → app.use(RateLimitMiddleware())
-plumekit generate job SendEmail         # → registry.register(SendEmailJob.self) in buildJobs()
+plumekit generate job SendEmail         # → Sources/App/Jobs/SendEmailJob.swift (auto-discovered)
 plumekit generate seeder Demo           # → Database/Seeders/DemoSeeder.swift; run with `plumekit seed`
 ```
 

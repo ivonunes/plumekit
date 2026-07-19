@@ -22,18 +22,32 @@ public final class Application: @unchecked Sendable {
 
     // MARK: - Route registration
 
-    /// Register a handler for an arbitrary method.
-    public func on(_ method: HTTPMethod, _ path: String, _ handler: @escaping Responder) {
-        router.add(method, path, handler)
+    /// Register a handler for an arbitrary method. `body: .streaming` delivers the
+    /// request body through `request.bodyReader` instead of buffering it (see
+    /// `RequestBodyMode`).
+    public func on(_ method: HTTPMethod, _ path: String, body: RequestBodyMode = .buffered,
+                   _ handler: @escaping Responder) {
+        router.add(method, path, handler, bodyMode: body)
     }
 
     public func get(_ path: String, _ handler: @escaping Responder) { on(.get, path, handler) }
-    public func post(_ path: String, _ handler: @escaping Responder) { on(.post, path, handler) }
-    public func put(_ path: String, _ handler: @escaping Responder) { on(.put, path, handler) }
-    public func patch(_ path: String, _ handler: @escaping Responder) { on(.patch, path, handler) }
+    public func post(_ path: String, body: RequestBodyMode = .buffered,
+                     _ handler: @escaping Responder) { on(.post, path, body: body, handler) }
+    public func put(_ path: String, body: RequestBodyMode = .buffered,
+                    _ handler: @escaping Responder) { on(.put, path, body: body, handler) }
+    public func patch(_ path: String, body: RequestBodyMode = .buffered,
+                      _ handler: @escaping Responder) { on(.patch, path, body: body, handler) }
     public func delete(_ path: String, _ handler: @escaping Responder) { on(.delete, path, handler) }
     public func head(_ path: String, _ handler: @escaping Responder) { on(.head, path, handler) }
     public func options(_ path: String, _ handler: @escaping Responder) { on(.options, path, handler) }
+
+    /// The registered body mode for a request, so a streaming-capable adapter can
+    /// decide BEFORE buffering whether to deliver live chunks. Unmatched requests
+    /// are `.buffered` (their body is needed for the normal 404/405 path).
+    public func requestBodyMode(_ method: HTTPMethod, _ path: String) -> RequestBodyMode {
+        if case .found(_, _, let mode) = router.match(method: method, path: path) { return mode }
+        return .buffered
+    }
 
     // MARK: - Middleware
 
@@ -116,7 +130,7 @@ public final class Application: @unchecked Sendable {
         // default. Runs exactly once — `dispatch` no longer renders pages itself, so a
         // custom page that returns an empty body isn't invoked twice. A response with a
         // body of its own is left untouched.
-        if response.body.isEmpty, response.status >= 400 {
+        if response.body.isEmpty, response.status >= 400, !isStreamed(response) {
             response = await renderErrorPage(response.status, for: request)
                 ?? defaultErrorResponse(response.status)
         }
@@ -158,17 +172,34 @@ public final class Application: @unchecked Sendable {
             }
         }
         switch result {
-        case .found(let handler, let parameters):
+        case .found(let handler, let parameters, let bodyMode):
             var matched = request
             matched.parameters = parameters
+            // A streaming route on a buffered transport (the Worker, Lambda, the
+            // test client): hand the handler a replay of the bytes already read, so
+            // the same handler code runs everywhere.
+            if bodyMode == .streaming, matched.bodyReader == nil {
+                matched.bodyReader = .replaying(matched.body)
+                matched.body = []
+            }
             var response = try await handler(matched)
-            if request.method == .head { response.body = [] }
+            if request.method == .head {
+                response.body = []
+                response.bodyStream = nil
+            }
             return response
         case .methodNotAllowed:
             return Response.status(405)   // custom/default page applied once in respondThrowing
         case .notFound:
             return Response.status(404)
         }
+    }
+
+    /// Whether the response carries a streamed body (pattern-match, not `!= nil`:
+    /// Optional equality isn't Embedded-clean for a non-Equatable payload).
+    private func isStreamed(_ response: Response) -> Bool {
+        if case .some = response.bodyStream { return true }
+        return false
     }
 
     /// The built-in plain-text page for an error status, used when no custom page is set.

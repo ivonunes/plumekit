@@ -109,15 +109,22 @@ func validationRules(_ f: GeneratedField) -> String {
     }
 }
 
-/// A `request.form[...]` expression that yields the field's Swift type.
+/// What `generate model`/`generate resource` output needs: the generated code
+/// queries through `Database.current`, which traps when the capability is off.
+/// Declared next to the generators; the generate command gates on it.
+let modelRequiredCapabilities = ["database"]
+
+/// A `form[...]` expression that yields the field's Swift type. The handler binds
+/// `let form = request.form` once — parsing is per access, so per-field
+/// `request.form[...]` reads would re-parse the body for every field.
 func formValueExpr(_ f: GeneratedField) -> String {
     switch f.token {
-    case "int": return "Int(request.form[\"\(f.name)\"] ?? \"\") ?? 0"
-    case "int64": return "Int64(request.form[\"\(f.name)\"] ?? \"\") ?? 0"
-    case "double": return "Double(request.form[\"\(f.name)\"] ?? \"\") ?? 0"
-    case "bool": return "request.form[\"\(f.name)\"] == \"true\""
-    case "blob": return "Array((request.form[\"\(f.name)\"] ?? \"\").utf8)"
-    default: return "request.form[\"\(f.name)\"] ?? \"\""
+    case "int": return "Int(form[\"\(f.name)\"] ?? \"\") ?? 0"
+    case "int64": return "Int64(form[\"\(f.name)\"] ?? \"\") ?? 0"
+    case "double": return "Double(form[\"\(f.name)\"] ?? \"\") ?? 0"
+    case "bool": return "form[\"\(f.name)\"] == \"true\""
+    case "blob": return "Array((form[\"\(f.name)\"] ?? \"\").utf8)"
+    default: return "form[\"\(f.name)\"] ?? \"\""
     }
 }
 
@@ -344,7 +351,7 @@ func generateSeeder(name: String) -> Int32 {
     import PlumeORM
 
     let \(value) = Seeder { _ in
-        // Insert seed rows, e.g. `try await Widget(name: "…").save()`. Make it
+        // Insert seed rows, e.g. `_ = try await Widget(name: "…").save()`. Make it
         // idempotent (upsert) if it may run more than once.
     }
 
@@ -413,6 +420,8 @@ func generateResource(name: String, fields rawFields: [String]) -> Int32 {
     let reRenderArgs = validated.map {
         "old\(generatorCapitalize($0.name)): input.string(\"\($0.name)\"), \($0.name)Error: input.errors.first(\"\($0.name)\")"
     }.joined(separator: ", ")
+    // One parse, many field reads (form access parses per call).
+    let formBinding = fields.isEmpty ? "" : "\n        let form = request.form"
     let validationBlock = validated.isEmpty ? "" : """
 
             let input = request.validate([\(rules)])
@@ -436,7 +445,7 @@ func generateResource(name: String, fields rawFields: [String]) -> Int32 {
 
     struct \(name)Controller: Controller {
         func index(_ request: Request) async throws -> Response {
-            let items = try await \(name).all().order(by: \(name).id, .descending).all()
+            let items = try await \(name).query().order(by: \(name).id, .descending).all()
             return .view(\(lower)Index(items: items,
                                        flash: request.flash?.message ?? ""))
         }
@@ -455,14 +464,14 @@ func generateResource(name: String, fields rawFields: [String]) -> Int32 {
             return .view(\(lower)Edit(item: item))
         }
 
-        func create(_ request: Request) async throws -> Response {\(validationBlock)
+        func create(_ request: Request) async throws -> Response {\(validationBlock)\(formBinding)
             let item = \(name)(\(initArgs))
             _ = try await item.save()
             return .redirect(to: \(name)Routes.index.path).flash("\(name) created")
         }
 
         func update(_ request: Request) async throws -> Response {
-            guard let item = try await \(name).find(request) else { return .status(404) }
+            guard let item = try await \(name).find(request) else { return .status(404) }\(formBinding)
     \(assigns.isEmpty ? "        _ = item" : assigns)
             _ = try await item.save()
             return .redirect(to: \(name)Routes.show.path(item.id)).flash("\(name) updated")
@@ -568,7 +577,7 @@ func generateResource(name: String, fields rawFields: [String]) -> Int32 {
     """
     if writeGenerated(factory + "\n", to: "Sources/App/Database/Factories/\(name)Factory.swift", label: "factory") != 0 { return 1 }
 
-    let formQuery = fields.map { "\($0.name)=\(formDefaultValue($0))" }.joined(separator: "&")
+    let formFields = fields.map { "(\"\($0.name)\", \"\(formDefaultValue($0))\")" }.joined(separator: ", ")
     let test = """
     import Testing
     @testable import App
@@ -583,7 +592,8 @@ func generateResource(name: String, fields rawFields: [String]) -> Int32 {
 
         @Test func creates\(name)ViaForm() async throws {
             let app = try await TestApp.boot(buildApp, migrations: runMigrations)
-            #expect((await app.client.postForm("/\(table)", "_csrf=\\(app.csrfToken)&\(formQuery)")).isRedirect)
+            // app.postForm encodes the fields and adds the CSRF token automatically.
+            #expect((await app.postForm("/\(table)", [\(formFields)])).isRedirect)
         }
     }
     """

@@ -39,6 +39,11 @@ public struct Request: Sendable {
     /// resolving a cookie session or bearer token; nil when unauthenticated.
     public var principal: Principal?
 
+    /// Chunked access to the request body on a `.streaming` route (`body` is empty
+    /// there). Set by the native adapter with live chunks; buffered adapters get a
+    /// one-shot replay filled in at dispatch. Nil on `.buffered` routes.
+    public var bodyReader: RequestBodyReader?
+
     public init(
         method: HTTPMethod,
         path: String,

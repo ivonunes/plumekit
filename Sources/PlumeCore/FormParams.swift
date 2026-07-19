@@ -67,8 +67,9 @@ public struct FormParams: Sendable {
 }
 
 extension Request {
-    /// The request body parsed as form-urlencoded parameters.
+    /// The request body parsed as form-urlencoded parameters. Parsing is O(body)
+    /// per access — reading several fields, bind it once: `let form = request.form`.
     public var form: FormParams { FormParams(bodyText) }
-    /// The query string parsed as parameters.
+    /// The query string parsed as parameters (same note as `form`).
     public var queryParams: FormParams { FormParams(query) }
 }

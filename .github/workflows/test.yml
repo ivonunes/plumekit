@@ -12,6 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: swift:6.3
+    # A live Postgres so the pooled-driver integration tests run in CI (they
+    # skip wherever PLUMEKIT_TEST_POSTGRES_URL is unset).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -30,6 +42,8 @@ jobs:
 
       - name: Test
         run: swift test
+        env:
+          PLUMEKIT_TEST_POSTGRES_URL: host=postgres port=5432 user=postgres password=postgres dbname=postgres
 
       - name: Release build
         run: swift build -c release --static-swift-stdlib

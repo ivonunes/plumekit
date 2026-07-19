@@ -109,12 +109,13 @@ enum APIReference {
 
         Inside a handler, ORM calls use the current request's database automatically — no `in:`:
         Persistence:
-          • try await post.save()            — INSERT/UPDATE; populates id; returns [ValidationError]
-          • try await post.upsert()
+          • let errors = try await post.save()   — INSERT/UPDATE; populates id; returns
+            [ValidationError], [] on success (nothing persisted when non-empty — check it)
+          • let errors = try await post.upsert()
           • try await post.delete()
           • try await Post.find(id)          — Post?
         Typed query builder:
-          • Post.all()                       — a Query
+          • Post.query()                     — a Query builder
           • Post.where(Post.published == true && Post.views > 5)
           • .order(by: Post.id, .descending)
           • .limit(10)
@@ -124,7 +125,7 @@ enum APIReference {
             nextPage/previousPage, nextURL(_:)/previousURL(_:), total/totalPages (when counted),
             hasMore. Return with `.json(page)` for the standard envelope (+ total/page when counted)
         The database is ambient in migrations, seeders, and background jobs too — the only place you pass
-        it explicitly is a test: `post.save(in: db)`, `Post.all().all(in: db)`.
+        it explicitly is a test: `post.save(in: db)`, `Post.all(in: db)`.
         A wrong-type predicate (e.g. Post.published > 5) is a COMPILE error. Relationships: @BelongsTo /
         @HasMany with `try await post.$comments.load(in: db)`. Relations work with any primary-key type
         (Int, UUID, String) — the FK stores the parent's raw key; read `$post.id` (Int FK) or `$post.key`

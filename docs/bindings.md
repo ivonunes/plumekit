@@ -156,6 +156,12 @@ typed rows through the same `SQLDatabase`.
 Build with `PKG_CONFIG_PATH=$(brew --prefix libpq)/lib/pkgconfig`. (Postgres-native
 DDL, `SERIAL` vs SQLite `AUTOINCREMENT`, is handled by Migrations.)
 
+The driver keeps a pool of asynchronous connections (default 8; set
+`DATABASE_POOL_SIZE` to change it) and caches prepared statements per connection.
+Behind a **transaction-mode** pooler (pgbouncer's default mode, Supabase's pooler
+on port 6543) prepared statements can't be reused across backends, so set
+`DATABASE_PREPARED_STATEMENTS=off` there.
+
 ### Opt-in S3
 
 `PlumeS3` (S3 request signing via swift-crypto + URLSession; no vendor SDK) is a
@@ -189,6 +195,25 @@ app.get("/avatars/:id") { request in
                                     contentType: "image/png")
 }
 ```
+
+### Streaming writes
+
+`put(_:from:)` writes an object from a chunk stream — pair it with a
+`body: .streaming` route (see [Routing](routing.md#streaming-bodies)) and an
+upload flows into storage without ever sitting in memory whole:
+
+```swift
+app.post("/import", body: .streaming) { request in
+    guard let reader = request.bodyReader else { return .status(400) }
+    try await Storage.current.put("imports/latest.csv", from: reader)
+    return .status(201)
+}
+```
+
+The filesystem driver appends to disk (via a temp file, so a failed upload never
+leaves a half-written object at the key); the S3 driver uses a multipart upload
+(8 MB parts, one plain PUT for smaller objects, aborted server-side on failure).
+Drivers without a streaming path collect the chunks and do one `put`.
 
 ## Capability presence is a compile-time gate
 
