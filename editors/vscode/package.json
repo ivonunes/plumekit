@@ -2,7 +2,7 @@
   "name": "plume",
   "displayName": "Plume",
   "description": "Plume template language support, plus PlumeKit project commands (serve, dev, build, deploy, migrate, routes, doctor, generate).",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "publisher": "ivonunes",
   "license": "MIT",
   "icon": "icon.png",
