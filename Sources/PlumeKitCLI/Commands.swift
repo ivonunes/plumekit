@@ -1319,7 +1319,10 @@ private func migrateD1(path: String, d1: D1Target, dbName: String?, assumeYes: B
 
     print("→ applying \(pending.count) migration(s): \(pending.joined(separator: ", "))")
     if let (api, databaseId) = apiTransport {
-        guard api.d1Query(databaseId: databaseId, sql: dump.output) != nil else { return 1 }
+        guard api.d1Query(databaseId: databaseId, sql: dump.output) != nil else {
+            errorLine("applying migrations to D1 \"\(database)\" failed")
+            return 1
+        }
         return 0
     }
 
@@ -1432,7 +1435,11 @@ private func applyToD1(path: String, verb: String, dumpMode: String, only: Strin
     }
 
     if let (api, databaseId) = apiTransport {
-        guard api.d1Query(databaseId: databaseId, sql: dump.output) != nil else { return 1 }
+        guard api.d1Query(databaseId: databaseId, sql: dump.output) != nil else {
+            errorLine("applying \(dumpMode) SQL to D1 \"\(database)\" failed "
+                      + "(\(dump.output.utf8.count) bytes)")
+            return 1
+        }
         return 0
     }
 

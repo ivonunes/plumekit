@@ -13,10 +13,20 @@ func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: Cloudfl
         return 1
     }
 
+    // Progress on stderr, unbuffered: an upload that stalls has to say what it was
+    // doing. stdout is block-buffered when the CLI is piped or redirected, so a
+    // `print` here would only surface once the process exits — exactly when it is
+    // no longer useful.
+    func step(_ message: String) {
+        FileHandle.standardError.write(Data("→ \(message)\n".utf8))
+    }
+
     // Resolve-or-create the declared resources first; bindings need real ids.
+    step("Provisioning declared resources")
     guard let config = provisionCloudflareResources(
         config: initialConfig, api: api,
         projectRoot: projectRoot, bundleToml: bundleDir + "/wrangler.toml", env: env) else {
+        errorLine("provisioning the declared Cloudflare resources failed")
         return 1
     }
 
@@ -28,7 +38,11 @@ func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: Cloudfl
         if !assets.isEmpty {
             var manifest: [String: Any] = [:]
             for asset in assets { manifest["/" + asset.path] = ["hash": asset.hash, "size": asset.size] }
-            guard let session = api.startAssetsUploadSession(script: script, manifest: manifest) else { return 1 }
+            step("Assets: opening an upload session for \(assets.count) file(s)")
+            guard let session = api.startAssetsUploadSession(script: script, manifest: manifest) else {
+                errorLine("could not open an assets upload session for \"\(script)\"")
+                return 1
+            }
             // No buckets → every asset is already stored; the session token completes.
             var completion = session.jwt
             let byHash = Dictionary(assets.map { ($0.hash, $0) }, uniquingKeysWith: { first, _ in first })
@@ -42,7 +56,11 @@ func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: Cloudfl
                     }
                     form.addField(name: hash, value: bytes.base64EncodedString(), contentType: asset.contentType)
                 }
-                guard let jwt = api.uploadAssetBucket(form: form, sessionJWT: session.jwt) else { return 1 }
+                step("Assets: uploading a bucket of \(bucket.count) file(s)")
+                guard let jwt = api.uploadAssetBucket(form: form, sessionJWT: session.jwt) else {
+                    errorLine("uploading an asset bucket failed")
+                    return 1
+                }
                 completion = jwt
             }
             assetsJWT = completion
@@ -55,6 +73,7 @@ func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: Cloudfl
     // A tag that is missing OR not in our list (scripts migrated under wrangler
     // carry their own tag history, e.g. a v2 we never declared) falls back to the
     // namespaces API: drop steps whose classes are already live.
+    step("Reading the deployed script's durable-object migration tag")
     let currentTag = api.scriptMigrationTag(script: script)
     var pendingMigrations = config.migrations
     if let currentTag, let index = pendingMigrations.firstIndex(where: { $0.tag == currentTag }) {
@@ -115,8 +134,11 @@ func deployCloudflareViaAPI(projectRoot: String, bundleDir: String, api: Cloudfl
         return form
     }
 
-    print(Style.cyan("→") + " Deploying \"\(script)\" (Cloudflare API)")
-    guard let form = scriptForm(metadata) else { return 1 }
+    step("Deploying \"\(script)\" (Cloudflare API)")
+    guard let form = scriptForm(metadata) else {
+        errorLine("could not build the script upload form")
+        return 1
+    }
     var upload = api.uploadScript(script: script, form: form, quietErrors: true)
     if !upload.ok, metadata["migrations"] != nil, (upload.error ?? "").contains("already depended on") {
         // The durable-object classes are live even though no migration tag could be

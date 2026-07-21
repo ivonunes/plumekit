@@ -80,9 +80,41 @@ struct CloudflareAPI {
         return (json?["result"] ?? [:] as [String: Any], nil)
     }
 
+    /// Every item of a list endpoint, paging until it runs out.
+    ///
+    /// `page` is a REQUEST, not a promise. Several Cloudflare list endpoints (the
+    /// worker scripts list and the durable-object namespaces list among them) ignore
+    /// it and return the whole collection every time — so a loop that stops only on
+    /// an empty page never stops, and hammers the API forever at one request per
+    /// iteration. Two independent brakes: a short page is the last page (ordinary
+    /// pagination), and a page identical to the one before it means the endpoint is
+    /// not paging at all.
+    func listAll(_ path: String, perPage: Int = 100) -> [[String: Any]] {
+        let join = path.contains("?") ? "&" : "?"
+        var out: [[String: Any]] = []
+        var previous: String?
+        var page = 1
+        while page <= 100 {
+            guard let items = call("GET", "\(path)\(join)per_page=\(perPage)&page=\(page)",
+                                   quietErrors: true) as? [[String: Any]], !items.isEmpty else { break }
+            let signature = items
+                .map { String(describing: $0["id"] ?? $0["name"] ?? $0["queue_name"] ?? $0["title"] ?? "") }
+                .joined(separator: ",")
+            if signature == previous { break }
+            previous = signature
+            out += items
+            if items.count < perPage { break }
+            page += 1
+        }
+        return out
+    }
+
     func callJSON(_ method: String, _ path: String, json object: Any, bearer: String? = nil,
                   quietErrors: Bool = false) -> Any? {
-        guard let body = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+        guard let body = try? JSONSerialization.data(withJSONObject: object) else {
+            if !quietErrors { errorLine("could not encode the request body for \(method) \(path)") }
+            return nil
+        }
         return call(method, path, contentType: "application/json", body: body,
                     bearer: bearer, quietErrors: quietErrors)
     }
@@ -101,14 +133,10 @@ struct CloudflareAPI {
            let tag = scriptInfo["migration_tag"] as? String, !tag.isEmpty {
             return tag
         }
-        var page = 1
-        while let scripts = call("GET", "/accounts/\(accountId)/workers/scripts?per_page=100&page=\(page)",
-                                 quietErrors: true) as? [[String: Any]], !scripts.isEmpty {
-            if let match = scripts.first(where: { ($0["id"] as? String) == script }),
-               let tag = match["migration_tag"] as? String, !tag.isEmpty {
-                return tag
-            }
-            page += 1
+        let scripts = listAll("/accounts/\(accountId)/workers/scripts")
+        if let match = scripts.first(where: { ($0["id"] as? String) == script }),
+           let tag = match["migration_tag"] as? String, !tag.isEmpty {
+            return tag
         }
         return nil
     }
@@ -117,14 +145,9 @@ struct CloudflareAPI {
     /// the ground truth for "has this class been migrated", independent of tags.
     func durableObjectClasses(script: String) -> Set<String> {
         var classes: Set<String> = []
-        var page = 1
-        while let namespaces = call(
-            "GET", "/accounts/\(accountId)/workers/durable_objects/namespaces?per_page=100&page=\(page)",
-            quietErrors: true) as? [[String: Any]], !namespaces.isEmpty {
-            for namespace in namespaces where (namespace["script"] as? String) == script {
-                if let className = namespace["class"] as? String { classes.insert(className) }
-            }
-            page += 1
+        let namespaces = listAll("/accounts/\(accountId)/workers/durable_objects/namespaces")
+        for namespace in namespaces where (namespace["script"] as? String) == script {
+            if let className = namespace["class"] as? String { classes.insert(className) }
         }
         return classes
     }
@@ -165,13 +188,9 @@ struct CloudflareAPI {
     }
 
     func queueId(name: String) -> String? {
-        var page = 1
-        while let queues = call("GET", "/accounts/\(accountId)/queues?per_page=100&page=\(page)",
-                                quietErrors: true) as? [[String: Any]], !queues.isEmpty {
-            if let match = queues.first(where: { ($0["queue_name"] as? String) == name }) {
-                return (match["queue_id"] as? String) ?? (match["id"] as? String)
-            }
-            page += 1
+        let queues = listAll("/accounts/\(accountId)/queues")
+        if let match = queues.first(where: { ($0["queue_name"] as? String) == name }) {
+            return (match["queue_id"] as? String) ?? (match["id"] as? String)
         }
         return nil
     }
@@ -216,8 +235,18 @@ struct CloudflareAPI {
 
     /// Run SQL against a D1 database. Returns the per-statement result objects.
     func d1Query(databaseId: String, sql: String) -> [[String: Any]]? {
-        callJSON("POST", "/accounts/\(accountId)/d1/database/\(databaseId)/query",
-                 json: ["sql": sql]) as? [[String: Any]]
+        let result = callJSON("POST", "/accounts/\(accountId)/d1/database/\(databaseId)/query",
+                              json: ["sql": sql])
+        // A successful call whose `result` isn't the expected array used to fall
+        // out of an `as?` as a bare nil, leaving the caller to fail with nothing
+        // to report. Say what came back instead.
+        guard let result else { return nil }
+        guard let rows = result as? [[String: Any]] else {
+            errorLine("D1 query succeeded but returned an unexpected result shape "
+                      + "(\(type(of: result))): \(String(describing: result).prefix(300))")
+            return nil
+        }
+        return rows
     }
 
     // MARK: - Provisioning lookups & creates
@@ -225,14 +254,10 @@ struct CloudflareAPI {
     /// Ids of KV namespaces with exactly this title. More than one means the title
     /// is ambiguous (Cloudflare doesn't enforce unique titles) — callers must not guess.
     func findKVNamespaces(title: String) -> [String] {
-        var ids: [String] = []
-        var page = 1
-        while let namespaces = call("GET", "/accounts/\(accountId)/storage/kv/namespaces?per_page=100&page=\(page)",
-                                    quietErrors: true) as? [[String: Any]], !namespaces.isEmpty {
-            ids += namespaces.filter { ($0["title"] as? String) == title }.compactMap { $0["id"] as? String }
-            page += 1
-        }
-        return ids
+        let namespaces = listAll("/accounts/\(accountId)/storage/kv/namespaces")
+        return namespaces
+            .filter { ($0["title"] as? String) == title }
+            .compactMap { $0["id"] as? String }
     }
 
     func createKVNamespace(title: String) -> String? {
