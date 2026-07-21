@@ -5,4 +5,29 @@ The notes for the next release: everything below is in `main` and ships
 together when the version is tagged.
 <!-- unreleased-intro-end -->
 
-Nothing yet.
+## A worker's first deploy no longer hangs
+
+Deploying a worker that had never been deployed before could hang for ever.
+Several Cloudflare list endpoints ignore the `page` parameter and return the
+whole collection on every request, and the API client paged them until a page
+came back empty, which never happened. A worker that had been deployed
+already short-circuited the loop on its migration tag, so the hang only
+showed on a first deploy, including the first deploy of a new `--env`
+environment.
+
+Paging now stops on a short page, or on a page identical to the one before
+it. There is nothing to do: a deploy interrupted by the hang can simply be
+run again, and it adopts the versionless worker Cloudflare was left holding.
+
+## Deploys say what went wrong, and where they are
+
+A few paths used to fail with nothing printed at all: a D1 query whose
+response did not have the expected shape, a request body that could not be
+encoded, and the migrate and seed steps that call them. They now name the
+database, the step and what came back.
+
+`plumekit deploy` also traces its progress as it runs (provisioning, assets,
+the migration tag, the script upload), so a slow or stalled deploy says where
+it has got to. That trace goes to stderr on purpose: stdout is block-buffered
+when the CLI is redirected to a file or a pipe, so progress written there
+would only appear once the process had already exited.
