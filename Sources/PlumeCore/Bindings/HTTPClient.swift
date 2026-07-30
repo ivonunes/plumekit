@@ -14,13 +14,23 @@ public struct FetchRequest: Sendable {
     public var url: String
     public var headers: [(name: String, value: String)]
     public var body: [UInt8]
+    /// How long to wait for the response, in seconds. `nil` leaves it to the
+    /// adapter's default (`FetchRequest.defaultTimeoutSeconds`). Raise it for
+    /// slow upstreams — an AI provider generating a long answer, say — where the
+    /// default would cut a healthy request short.
+    public var timeoutSeconds: Int?
+
+    /// What an adapter waits when a request doesn't ask for anything else.
+    public static let defaultTimeoutSeconds = 120
 
     public init(method: String = "GET", url: String,
-                headers: [(name: String, value: String)] = [], body: [UInt8] = []) {
+                headers: [(name: String, value: String)] = [], body: [UInt8] = [],
+                timeoutSeconds: Int? = nil) {
         self.method = method
         self.url = url
         self.headers = headers
         self.body = body
+        self.timeoutSeconds = timeoutSeconds
     }
 }
 
@@ -96,9 +106,11 @@ public struct HTTP: Sendable {
 //
 // Request:  [u8 methodLen][method][u32 urlLen][url][u16 headerCount]
 //           ([u16 nameLen][name][u16 valueLen][value])* [u32 bodyLen][body]
+//           [u32 timeoutSeconds]
 // Response: [u16 status][u16 headerCount]
 //           ([u16 nameLen][name][u16 valueLen][value])* [body…]
-// All integers little-endian.
+// All integers little-endian. The timeout trails the body (0 = the adapter's
+// default) so a host that predates it simply stops reading at the body.
 
 public enum FetchWire {
     public static func encodeRequest(_ request: FetchRequest) -> [UInt8] {
@@ -120,6 +132,7 @@ public enum FetchWire {
         }
         appendU32(&out, request.body.count)
         out.append(contentsOf: request.body)
+        appendU32(&out, max(0, request.timeoutSeconds ?? 0))
         return out
     }
 

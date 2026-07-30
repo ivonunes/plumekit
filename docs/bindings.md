@@ -76,6 +76,15 @@ filesystem and S3; natively (`plumekit serve`), on `wrangler dev` and as a
 `provided.al2` Lambda. Each adapter conforms to the same protocol; nothing in the
 core or app names a platform type.
 
+An outbound request waits `FetchRequest.defaultTimeoutSeconds` (120) for its
+answer unless it asks for longer, which is worth doing for an upstream that can
+legitimately take its time:
+
+```swift
+try await HTTP.current.request(FetchRequest(
+    method: "POST", url: endpoint, body: body, timeoutSeconds: 300))
+```
+
 ## Selection (compile-time) vs config (runtime)
 
 - **Selection** of an adapter set is **compile-time, manifest-driven**. A

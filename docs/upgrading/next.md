@@ -5,4 +5,27 @@ The notes for the next release: everything below is in `main` and ships
 together when the version is tagged.
 <!-- unreleased-intro-end -->
 
-Nothing yet.
+## A disconnecting client can no longer wedge a worker
+
+A worker isolate runs one guest call at a time. A request the runtime dropped
+mid-flight, as it does when a client disconnects, never released its place in
+the queue, so every later request in that isolate waited for ever at zero CPU.
+Mobile clients hit this most, since they cancel requests routinely.
+
+A request that has queued for longer than any healthy call now takes over on a
+fresh instance, and logs that it did. The client's body is also read before the
+request queues, so a slow upload no longer blocks the isolate. Nothing to do
+beyond deploying.
+
+## Outbound HTTP takes a per-request timeout
+
+`FetchRequest` gains a `timeoutSeconds` for upstreams that need longer than the
+120 seconds every request used to be held to:
+
+```swift
+try await HTTP.current.request(FetchRequest(
+    method: "POST", url: endpoint, body: body, timeoutSeconds: 300))
+```
+
+Unset means 120 as before (`FetchRequest.defaultTimeoutSeconds`). Both the
+native and Cloudflare adapters honour it.

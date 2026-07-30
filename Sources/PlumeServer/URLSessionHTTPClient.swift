@@ -15,18 +15,7 @@ public struct URLSessionHTTPClient: HTTPClient {
     }
 
     public func request(_ fetchRequest: FetchRequest) async throws -> FetchResponse {
-        guard let parsed = URL(string: fetchRequest.url) else {
-            throw FetchError.badURL(fetchRequest.url)
-        }
-        var urlRequest = URLRequest(url: parsed)
-        urlRequest.httpMethod = fetchRequest.method
-        for header in fetchRequest.headers {
-            urlRequest.addValue(header.value, forHTTPHeaderField: header.name)
-        }
-        if !fetchRequest.body.isEmpty {
-            urlRequest.httpBody = Data(fetchRequest.body)
-        }
-        urlRequest.timeoutInterval = 120
+        let urlRequest = try Self.urlRequest(for: fetchRequest)
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
         let httpResponse = response as? HTTPURLResponse
         var headers: [(name: String, value: String)] = []
@@ -39,6 +28,26 @@ public struct URLSessionHTTPClient: HTTPClient {
         }
         return FetchResponse(status: httpResponse?.statusCode ?? 0,
                              body: [UInt8](data), headers: headers)
+    }
+
+    /// The URLRequest a `FetchRequest` maps onto. `timeoutInterval` is URLSession's
+    /// idle limit: how long the request may sit with no data arriving, which is
+    /// exactly what a slow upstream trips.
+    static func urlRequest(for fetchRequest: FetchRequest) throws -> URLRequest {
+        guard let parsed = URL(string: fetchRequest.url) else {
+            throw FetchError.badURL(fetchRequest.url)
+        }
+        var urlRequest = URLRequest(url: parsed)
+        urlRequest.httpMethod = fetchRequest.method
+        for header in fetchRequest.headers {
+            urlRequest.addValue(header.value, forHTTPHeaderField: header.name)
+        }
+        if !fetchRequest.body.isEmpty {
+            urlRequest.httpBody = Data(fetchRequest.body)
+        }
+        urlRequest.timeoutInterval = TimeInterval(
+            fetchRequest.timeoutSeconds ?? FetchRequest.defaultTimeoutSeconds)
+        return urlRequest
     }
 
     public enum FetchError: Error { case badURL(String) }

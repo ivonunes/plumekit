@@ -21,12 +21,13 @@ const METHOD_CODES = { GET: 0, POST: 1, PUT: 2, PATCH: 3, DELETE: 4, HEAD: 5, OP
 // Largest request body the guest will accept (wasm linear memory only grows).
 const MAX_REQUEST_BYTES = 25 * 1024 * 1024;
 
-let instance;
-let promisingHandle;
-let promisingQueue;
+// How long a queued request waits for the one ahead of it before it assumes that
+// request is never coming back (see `serialized`).
+const GUEST_STALL_MS = 30 * 1000;
+
+let guest;                       // the live wasm instance — see currentGuest()
 const ctxTable = new Map();
 let nextCtx = 1;
-const mem = () => instance.exports.memory.buffer;
 const decoder = new TextDecoder();
 const utf8 = new TextEncoder();
 
@@ -58,13 +59,10 @@ function buildWasi(memFn) {
   return wasi;
 }
 
-function getInstance() {
-  if (instance) return instance;
-
-  const wasi = buildWasi(mem);
-
-  // Custom host bindings (the `env` module). KV is the reference binding.
-  const env = {
+// The custom host bindings (the `env` module), bound to one instance's memory.
+// KV is the reference binding.
+function buildHostBindings(mem) {
+  return {
     host_log: (ptr, len) => {
       console.log(decoder.decode(new Uint8Array(mem(), ptr, len)));
     },
@@ -345,7 +343,12 @@ function getInstance() {
         }
         const bLen = view.getUint32(i, true); i += 4;
         const body = bLen > 0 ? req.subarray(i, i + bLen) : undefined;
-        const response = await fetch(url, { method, headers, body });
+        i += bLen;
+        // Trailing per-request timeout in seconds (0 or absent = no deadline of
+        // ours; Cloudflare still applies its own subrequest limits).
+        const timeoutSeconds = i + 4 <= req.byteLength ? view.getUint32(i, true) : 0;
+        const signal = timeoutSeconds > 0 ? AbortSignal.timeout(timeoutSeconds * 1000) : undefined;
+        const response = await fetch(url, { method, headers, body, signal });
         const respBody = new Uint8Array(await response.arrayBuffer());
         const respHeaders = [];
         const enc = new TextEncoder();
@@ -369,7 +372,10 @@ function getInstance() {
         out.set(respBody, o);
         slot.stash = out;
         return out.length;
-      } catch {
+      } catch (e) {
+        // Includes our own per-request timeout firing (TimeoutError), which the
+        // guest can only see as status 0 — say which it was.
+        console.log("fetch failed: " + String((e && e.message) || e));
         slot.stash = null;
         return -1;
       }
@@ -390,14 +396,31 @@ function getInstance() {
       if (slot?.stash?.length) new Uint8Array(mem()).set(slot.stash, dstPtr);
     },
   };
+}
 
-  instance = new WebAssembly.Instance(wasmModule, { wasi_snapshot_preview1: wasi, env });
-  instance.exports._initialize();
-  promisingHandle = WebAssembly.promising(instance.exports.plumekit_handle);
-  if (instance.exports.plumekit_queue) {
-    promisingQueue = WebAssembly.promising(instance.exports.plumekit_queue);
-  }
-  return instance;
+// A wasm instance and everything bound to it: its memory accessor and the
+// JSPI-wrapped entry points. They travel together so that a call still running
+// on a retired instance keeps working against its own memory (see `serialized`).
+function createGuest() {
+  const g = {};
+  g.mem = () => g.instance.exports.memory.buffer;
+  g.instance = new WebAssembly.Instance(wasmModule, {
+    wasi_snapshot_preview1: buildWasi(g.mem),
+    env: buildHostBindings(g.mem),
+  });
+  g.instance.exports._initialize();
+  g.handle = WebAssembly.promising(g.instance.exports.plumekit_handle);
+  g.queue = g.instance.exports.plumekit_queue
+    ? WebAssembly.promising(g.instance.exports.plumekit_queue)
+    : null;
+  return g;
+}
+
+// The instance to run on. Call this INSIDE the gate: a retired instance is
+// replaced here, so the caller always gets one nothing else is running on.
+function currentGuest() {
+  if (!guest) guest = createGuest();
+  return guest;
 }
 
 // --- SQL wire codec (mirrors Sources/PlumeKitWorker/D1Database.swift) ---
@@ -518,17 +541,58 @@ function decodeResponse(bytes) {
 }
 
 // One handler invocation in flight at a time per isolate (v1 simplification):
-// the single instance shares linear memory + the cooperative executor across
-// requests, so serializing avoids interleaving hazards. Removable once per-ctx
-// state is fully threaded through the guest.
-let lock = Promise.resolve();
-async function serialized(fn) {
-  const prev = lock;
-  let release;
-  lock = new Promise((r) => (release = r));
-  await prev;
-  try { return await fn(); } finally { release(); }
+// the single instance shares linear memory, the cooperative executor AND the
+// guest's ambient request context across requests, so serializing avoids
+// interleaving hazards. Removable once per-ctx state is fully threaded through
+// the guest.
+//
+// Callers queue on a promise chain, each link released by the call ahead. The
+// catch is that the runtime can drop a request mid-flight — the client
+// disconnected, which mobile clients do routinely — and a dropped request never
+// runs the code that would release its link, which would leave every later
+// request in the isolate waiting on a promise that can never settle. So a
+// caller that has waited longer than any healthy call takes the gate anyway and
+// retires the instance the abandoned call was left holding. Retiring rather
+// than reusing is what makes that safe: a call that turns out to be alive after
+// all keeps its own instance and still answers its client, while everything
+// that follows starts clean on a fresh one.
+//
+// Exported for the runtime tests — this is the one piece of the file with
+// concurrency semantics worth asserting on their own.
+export function createGate({ timeoutMs, onStall }) {
+  let tail = Promise.resolve();
+  return async function gated(fn) {
+    const prev = tail;
+    let release;
+    tail = new Promise((r) => (release = r));
+    try {
+      if (!(await settles(prev, timeoutMs))) onStall();
+      return await fn();
+    } finally {
+      release();
+    }
+  };
 }
+
+// True when `promise` settles first, false when the deadline wins. The timer
+// belongs to the WAITING request, so it still fires when the request ahead is
+// gone — which is the whole point.
+function settles(promise, timeoutMs) {
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  return Promise.race([promise.then(() => true, () => true), deadline])
+    .finally(() => clearTimeout(timer));
+}
+
+const serialized = createGate({
+  timeoutMs: GUEST_STALL_MS,
+  onStall: () => {
+    console.log("plumekit: a guest call never finished (client disconnect?), starting a fresh instance");
+    guest = null;
+  },
+});
 
 // Real-time channel: a Durable Object hosting its OWN wasm instance. The
 // DO is long-lived + sharded (one per channel id); it HIBERNATES between messages,
@@ -660,8 +724,11 @@ export class ChannelDO {
     const prev = this._dispatchLock ?? Promise.resolve();
     let release;
     this._dispatchLock = new Promise((r) => (release = r));
-    await prev;
+    // The wait sits INSIDE the try so the link is released on every exit path.
+    // (No stall timeout is needed here, unlike the request gate: this lock lives
+    // on the DO instance, and an evicted DO is reconstructed with a fresh one.)
     try {
+      await prev;
       return await this.dispatchEventUnlocked(eventKind, room, subject, msg);
     } finally {
       release();
@@ -893,34 +960,36 @@ export default {
       const stub = env.CHANNEL.get(env.CHANNEL.idFromName(room));   // shard per room
       return stub.fetch(request);
     }
-    getInstance();
+    const url = new URL(request.url);
+    const headers = [];
+    for (const [name, value] of request.headers) headers.push([name, value]);
+    // Read the client's body BEFORE queueing for the guest: a slow or stalled
+    // upload must not hold every other request in the isolate behind it.
+    const body = new Uint8Array(await request.arrayBuffer());
+    // Cap the request body so a huge upload can't grow the isolate's linear memory
+    // without bound (wasm memory only grows).
+    if (body.length > MAX_REQUEST_BYTES) {
+      return new Response("413 Payload Too Large", { status: 413 });
+    }
+    const query = url.search.startsWith("?") ? url.search.slice(1) : url.search;
+    const wire = encodeRequest(request.method, url.pathname, query, headers, body);
+
     return await serialized(async () => {
+      const g = currentGuest();
       const ctx = nextCtx++;
       ctxTable.set(ctx, { env, stash: null });
       try {
-        const url = new URL(request.url);
-        const headers = [];
-        for (const [name, value] of request.headers) headers.push([name, value]);
-        const body = new Uint8Array(await request.arrayBuffer());
-        // Cap the request body so a huge upload can't grow the isolate's linear memory
-        // without bound (wasm memory only grows).
-        if (body.length > MAX_REQUEST_BYTES) {
-          return new Response("413 Payload Too Large", { status: 413 });
-        }
-        const query = url.search.startsWith("?") ? url.search.slice(1) : url.search;
-        const wire = encodeRequest(request.method, url.pathname, query, headers, body);
-
         let reqPtr = 0, respPtr = 0, respLen = 0, descPtr = 0;
         try {
-          reqPtr = instance.exports.plumekit_alloc(wire.length);
-          new Uint8Array(mem()).set(wire, reqPtr);
+          reqPtr = g.instance.exports.plumekit_alloc(wire.length);
+          new Uint8Array(g.mem()).set(wire, reqPtr);
 
-          descPtr = await promisingHandle(ctx, reqPtr, wire.length);
+          descPtr = await g.handle(ctx, reqPtr, wire.length);
 
-          const view = new DataView(mem());
+          const view = new DataView(g.mem());
           respPtr = view.getUint32(descPtr, true);
           respLen = view.getUint32(descPtr + 4, true);
-          const respBytes = new Uint8Array(mem()).slice(respPtr, respPtr + respLen);
+          const respBytes = new Uint8Array(g.mem()).slice(respPtr, respPtr + respLen);
 
           const decoded = decodeResponse(respBytes);
           const responseHeaders = new Headers();
@@ -931,9 +1000,9 @@ export default {
           return new Response(decoded.body, { status, headers: responseHeaders });
         } finally {
           // Free guest allocations even if the handle rejects (wasm memory only grows).
-          if (reqPtr) instance.exports.plumekit_free(reqPtr, wire.length);
-          if (respPtr) instance.exports.plumekit_free(respPtr, respLen);
-          if (descPtr) instance.exports.plumekit_free(descPtr, 8);
+          if (reqPtr) g.instance.exports.plumekit_free(reqPtr, wire.length);
+          if (respPtr) g.instance.exports.plumekit_free(respPtr, respLen);
+          if (descPtr) g.instance.exports.plumekit_free(descPtr, 8);
         }
       } finally {
         ctxTable.delete(ctx);
@@ -946,8 +1015,8 @@ export default {
   // dispatcher jobs use — and the guest runs whichever scheduled tasks are due
   // (matched against the wall clock, so one `* * * * *` cron drives them all).
   async scheduled(event, env, ctx) {
-    getInstance();
     await serialized(async () => {
+      const g = currentGuest();
       const callCtx = nextCtx++;
       ctxTable.set(callCtx, { env, stash: null });
       try {
@@ -961,12 +1030,12 @@ export default {
         bytes[1] = name.length & 0xff;
         bytes.set(name, 2);
         bytes.set(epoch, 2 + name.length);
-        const ptr = instance.exports.plumekit_alloc(bytes.length);
-        new Uint8Array(mem()).set(bytes, ptr);
+        const ptr = g.instance.exports.plumekit_alloc(bytes.length);
+        new Uint8Array(g.mem()).set(bytes, ptr);
         try {
-          await promisingQueue(callCtx, ptr, bytes.length);
+          await g.queue(callCtx, ptr, bytes.length);
         } finally {
-          instance.exports.plumekit_free(ptr, bytes.length);
+          g.instance.exports.plumekit_free(ptr, bytes.length);
         }
       } catch (e) {
         console.log("scheduled handler error:", e);
@@ -980,21 +1049,21 @@ export default {
   // the guest's plumekit_queue (the job registry). Serialized like fetch (one guest
   // call at a time). Each message body is the job envelope bytes the producer sent.
   async queue(batch, env) {
-    getInstance();
     for (const message of batch.messages) {
       await serialized(async () => {
+        const g = currentGuest();
         const ctx = nextCtx++;
         ctxTable.set(ctx, { env, stash: null });
         try {
           let bytes = message.body;   // sent with contentType "bytes" → ArrayBuffer
           if (bytes instanceof ArrayBuffer) bytes = new Uint8Array(bytes);
           else if (!(bytes instanceof Uint8Array)) bytes = new Uint8Array(bytes);
-          const ptr = instance.exports.plumekit_alloc(bytes.length);
-          new Uint8Array(mem()).set(bytes, ptr);
+          const ptr = g.instance.exports.plumekit_alloc(bytes.length);
+          new Uint8Array(g.mem()).set(bytes, ptr);
           try {
-            await promisingQueue(ctx, ptr, bytes.length);
+            await g.queue(ctx, ptr, bytes.length);
           } finally {
-            instance.exports.plumekit_free(ptr, bytes.length);
+            g.instance.exports.plumekit_free(ptr, bytes.length);
           }
           message.ack();
         } catch (e) {
