@@ -1,10 +1,10 @@
 # Resources
 
-Plume can collect page resources while rendering. A host application can then emit those resources as real CSS, JavaScript and image files instead of forcing everything inline.
+Plume templates can declare the CSS, JavaScript and images they need right next to the markup that uses them. Plume collects those declarations while rendering, and the host application turns them into real files instead of forcing everything inline.
 
 The important idea is locality: write the resource next to the markup that needs it, and let the host decide how to fingerprint, inject, optimise or copy it.
 
-## Lifecycle
+## How collection works
 
 When a template renders, Plume records resource declarations in the render result. It does not assume where those files should live in the final site.
 
@@ -17,7 +17,7 @@ A host can then:
 - Generate responsive images.
 - Inject links and scripts into the final document.
 
-When embedding Plume yourself, [Embedding](../embedding/index.md) explains how to emit collected resources.
+A host typically emits fingerprinted resources under a path such as `/assets/plume/`. When embedding Plume yourself, [Embedding](../embedding/index.md) explains how to emit collected resources.
 
 ## Styles
 
@@ -38,7 +38,9 @@ Use `@style` for CSS that belongs to the current template:
 </section>
 ```
 
-Use scoped styles for component CSS that should not leak into the rest of the page:
+### Scoped styles
+
+A component's CSS often should not leak into the rest of the page. Use scoped styles for that:
 
 ```plume
 @component Button(label, variant = "plain") {
@@ -57,7 +59,9 @@ Use scoped styles for component CSS that should not leak into the rest of the pa
 }
 ```
 
-Scoped styles are normal CSS. Plume rewrites selectors and marks the rendered fragment with a generated scope attribute.
+Scoped styles are normal CSS. Plume rewrites the selectors and marks the rendered fragment with a generated scope attribute.
+
+### Style files
 
 CSS files are supported too:
 
@@ -82,11 +86,17 @@ Use inline styles when the CSS only makes sense next to the template. Use CSS fi
 }
 ```
 
+See [Client scripts](client-scripts.md) for the language reference.
+
+### Script files
+
 Use `.plume` files when a script should live outside the template:
 
 ```plume
 @script(file: "scripts/menu.plume")
 ```
+
+### Raw JavaScript
 
 Raw JavaScript is available as an explicit escape hatch:
 
@@ -102,7 +112,7 @@ JavaScript files are treated as raw JavaScript automatically:
 @script(file: "scripts/site.js")
 ```
 
-## Scoped
+## Scoped scripts
 
 Scoped scripts belong to a rendered fragment. Inside the script, `root` is the fragment's top-level element:
 
@@ -137,7 +147,11 @@ Plume checks static asset references where the host provides enough information.
 
 Use `asset()` for files you want to reference from attributes, such as favicons, downloads, fonts and images that do not need generated markup.
 
-`asset()` works in **both** the interpreter and the **compiled** path. In a compiled template it is resolved **at build time** to a baked URL string literal (no runtime lookup in the Wasm build), so the argument must be a **string literal**. In PlumeKit it resolves to the content-hashed Plume bundle for the framework's own files (`asset("app.js")` → `/app.<hash>.js`, `asset("app.css")` → `/app.<hash>.css`) and passes your own `Public/` files through by path (`asset("logo.png")` → `/logo.png`).
+### Assets in compiled templates
+
+`asset()` works in both the interpreter and the compiled path. In a compiled template it is resolved at build time to a baked URL string literal, so there is no runtime lookup in the Wasm build. Because of that, the argument must be a string literal.
+
+In PlumeKit, `asset()` resolves the framework's own files to the content-hashed Plume bundle: `asset("app.js")` becomes `/app.<hash>.js` and `asset("app.css")` becomes `/app.<hash>.css`. Your own `Public/` files pass through by path, so `asset("logo.png")` becomes `/logo.png`.
 
 ## Images
 
@@ -154,19 +168,6 @@ Use `@image` when the host supports image generation:
 
 Plume records the image reference and requested attributes. The host can then resolve the file, inspect dimensions, generate responsive variants and emit the final `<img>` markup.
 
-Common arguments:
-
-- `src`
-- `alt`
-- `class`
-- `width`
-- `height`
-- `loading`
-- `decoding`
-- `fetchpriority`
-- `widths`
-- `sizes`
+Common arguments: `src`, `alt`, `class`, `width`, `height`, `loading`, `decoding`, `fetchpriority`, `widths` and `sizes`.
 
 Use `@image` when you want the host to produce the `<img>` element or add image metadata. Use `asset()` when you only need a URL.
-
-A host uses `asset()`, `@image`, `@style` and `@script` to emit fingerprinted resources, typically under a path such as `/assets/plume/`.

@@ -1,8 +1,10 @@
 # Embedding
 
-Plume is a Swift package. Host applications provide templates, context values, functions, components and resource handling.
+Plume is a Swift package that any application can embed. The host application provides templates, context values, functions, components and resource handling; Plume parses, checks and renders.
 
-## Render
+This page covers the embedding APIs, from a one-line render to a full host that emits resources and the client runtime.
+
+## Rendering a template
 
 The core API is `PlumeTemplate`:
 
@@ -20,6 +22,8 @@ let html = try template.render([
 
 Use `render` when you only need HTML.
 
+### Naming sources
+
 Use `sourceName` when you have one. Diagnostics, editor tooling, scoped resources and host-side file resolution are easier to understand when Plume knows which file is being rendered:
 
 ```swift
@@ -29,9 +33,9 @@ let template = try PlumeTemplate(
 )
 ```
 
-## Resources
+## Collecting resources
 
-Use `renderResult` when the host needs collected styles, scripts, state or navigation declarations:
+Templates can declare styles, scripts, images, state and navigation. Use `renderResult` when the host needs those collected declarations alongside the HTML:
 
 ```swift
 let result = try template.renderResult(context)
@@ -46,7 +50,7 @@ print(result.requiresRuntime)
 
 The host decides how resources are emitted. A host typically turns collected styles and scripts into fingerprinted files, emits responsive images and injects runtime scripts only when needed.
 
-Use `renderResult` for any template that may contain `@style`, `@script`, `@image`, `@state`, event bindings or `@navigation`.
+Use `renderResult` for any template that may contain `@style`, `@script`, `@image`, `@state`, event bindings or `@navigation`. See [Resources](../customise/resources.md) for the resource declarations themselves.
 
 ## Components
 
@@ -77,11 +81,13 @@ let html = try template.render([
 ])
 ```
 
+The template interpolates it like any other value:
+
 ```plume
 <article>{content}</article>
 ```
 
-## Functions
+## Host functions
 
 Host applications can expose functions:
 
@@ -118,6 +124,8 @@ let diagnostics = PlumeLanguageSupport.diagnostics(
 
 The standalone language server and editor extensions use the same language support APIs.
 
+### Checking many files
+
 When checking many files that share components, build the environment once and reuse it:
 
 ```swift
@@ -134,7 +142,7 @@ for file in files {
 
 This parses each component once instead of once per checked file.
 
-## Runtime
+## Emitting the runtime
 
 Emit the Plume runtime only when `result.requiresRuntime` is true. Static templates, components, styles, scripts, assets and images do not need it unless the page also uses state, event bindings, browser actions or navigation.
 
@@ -153,6 +161,8 @@ for style in result.styles {
 ```
 
 Write `PlumeBrowserRuntime.javaScript` to a file, or inline it, on pages that require the runtime. Use `PlumeCSSScoper.scope` to apply a scoped style's scope attribute to its CSS before emitting it.
+
+### Navigation
 
 When `@navigation` is enabled, the runtime intercepts same-origin links, fetches the next page, swaps the configured root element, updates the document title, loads missing Plume styles and module scripts, uses View Transitions where available and falls back to a normal page load on errors.
 

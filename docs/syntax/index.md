@@ -1,6 +1,6 @@
 # Syntax
 
-Plume syntax is deliberately small. Templates stay close to HTML, and the extra syntax is reserved for values, control flow, reusable components, resources and behaviour.
+Plume syntax is deliberately small. Templates stay close to HTML, and the extra syntax is reserved for values, control flow, reusable components, resources and behaviour. This page covers the core language: output, expressions, conditionals, loops, filters, methods and attribute helpers.
 
 ## Output
 
@@ -18,17 +18,18 @@ Expressions can start with values, literals, function calls or filters:
 {asset("images/avatar.png")}
 ```
 
-Host-provided `PlumeSafeHTML` renders as HTML. Ordinary strings are escaped. Use `| raw` only for trusted content.
+### Safe HTML and raw output
+
+Ordinary strings are escaped. Host-provided `PlumeSafeHTML` renders as HTML. Use `| raw` only for trusted content:
 
 ```plume
 <article>{post.html}</article>
 <article>{customHTML | raw}</article>
 ```
 
-**Always quote an interpolated attribute value.** Escaping covers text and quoted
-attributes, so `<a href="{url}">` is safe. An *unquoted* value like `<a href={url}>`
-is not: a value with a space could add an attribute of its own. Quote every attribute
-that contains `{...}`.
+### Quoting attribute values
+
+> **Warning:** Always quote an interpolated attribute value. Escaping covers text and quoted attributes, so `<a href="{url}">` is safe. An *unquoted* value like `<a href={url}>` is not: a value with a space could add an attribute of its own. Quote every attribute that contains `{...}`.
 
 ## Expressions
 
@@ -41,12 +42,16 @@ Expressions can read values from the context, local variables, loop variables, c
 {asset("images/avatar.png")}
 ```
 
+### Literals
+
 Supported literals include strings, numbers, booleans, `nil`, `null`, `empty`, `blank` and arrays:
 
 ```plume
 @let widths = [480, 960, 1440]
 @let fallbackTitle = "Untitled"
 ```
+
+### Operators
 
 Comparisons and boolean operators work in conditionals and bindings:
 
@@ -58,15 +63,19 @@ Comparisons and boolean operators work in conditionals and bindings:
 <button disabled?="{items.size == 0}">Continue</button>
 ```
 
-Operators follow Swift's precedence: prefix `!` binds tightest, then `??`, then
-comparisons, then `&&`, then `||`. So `!a == b` evaluates as `(!a) == b`. (This
-changed in Plume 2.0; earlier versions parsed it as `!(a == b)`.)
+Operators follow Swift's precedence: prefix `!` binds tightest, then `??`, then comparisons, then `&&`, then `||`. So `!a == b` evaluates as `(!a) == b`.
+
+> **Note:** This precedence changed in Plume 2.0. Earlier versions parsed `!a == b` as `!(a == b)`.
+
+### Ternaries
 
 Use ternaries for small inline choices:
 
 ```plume
 <span>{post.title ? post.title : "Untitled"}</span>
 ```
+
+### Truthiness
 
 For conditionals, empty strings, empty arrays, `false`, `nil` and `null` are falsey. Non-empty strings, non-empty arrays, numbers, dictionaries and safe HTML are truthy.
 
@@ -95,6 +104,8 @@ Use `@if`, `else if` and `else`:
 }
 ```
 
+### Optional binding
+
 Bind an optional with Swift-style `@if let`; the name is in scope for the body:
 
 ```plume
@@ -105,15 +116,15 @@ Bind an optional with Swift-style `@if let`; the name is in scope for the body:
 }
 ```
 
-Coalesce a missing value with `??` (only nil/null falls back; an empty string is
-a value, as in Swift). It binds tighter than comparison and is right-associative:
+### Nil coalescing
+
+Coalesce a missing value with `??`. Only nil/null falls back; an empty string is a value, as in Swift. It binds tighter than comparison and is right-associative:
 
 ```plume
 <title>{post.title ?? site.title ?? "Untitled"}</title>
 ```
 
-`@if let` and `??` mean the same thing whether a template runs through the
-interpreting renderer or the compiling back-end.
+`@if let` and `??` mean the same thing whether a template runs through the interpreting renderer or the compiling back-end. See [Compiling templates](../compiling/index.md) for the two back-ends.
 
 ## Loops
 
@@ -135,15 +146,17 @@ Loop metadata is available through `forloop`:
 }
 ```
 
-Available loop values are:
+The available loop values are:
 
-- `forloop.index`, starting at 1.
-- `forloop.index0`, starting at 0.
-- `forloop.rindex`, counting down to 1.
-- `forloop.rindex0`, counting down to 0.
-- `forloop.first`.
-- `forloop.last`.
-- `forloop.length`.
+| Value | Meaning |
+| --- | --- |
+| `forloop.index` | Position, starting at 1 |
+| `forloop.index0` | Position, starting at 0 |
+| `forloop.rindex` | Counts down to 1 |
+| `forloop.rindex0` | Counts down to 0 |
+| `forloop.first` | True on the first iteration |
+| `forloop.last` | True on the last iteration |
+| `forloop.length` | The total number of iterations |
 
 ## Comments
 
@@ -192,7 +205,7 @@ Useful methods include `contains`, `startsWith`, `endsWith`, `replace`, `replace
 
 ## Attributes
 
-Plume includes helpers for common conditional attributes:
+Classes and attributes often depend on a condition, and writing that with `@if` gets noisy. Plume includes helpers for the common cases:
 
 ```plume
 <a
@@ -207,11 +220,15 @@ Plume includes helpers for common conditional attributes:
 </a>
 ```
 
-- `class:name="{condition}"` appends a class when the condition is true.
-- `class+="{value}"` appends dynamic class names.
-- `attribute?="{value}"` omits the attribute when the value is empty or false.
-- `attribute:value="{condition}"` writes `attribute="value"` when true.
-- `style:name="{value}"` binds an inline style property.
+The helpers are:
+
+| Helper | Effect |
+| --- | --- |
+| `class:name="{condition}"` | Appends the class when the condition is true |
+| `class+="{value}"` | Appends dynamic class names |
+| `attribute?="{value}"` | Omits the attribute when the value is empty or false |
+| `attribute:value="{condition}"` | Writes `attribute="value"` when true |
+| `style:name="{value}"` | Binds an inline style property |
 
 Style bindings work with ordinary properties and custom properties:
 

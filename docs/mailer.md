@@ -1,10 +1,6 @@
 # Mailer
 
-Transactional email is a portable capability, alongside the database, KV, object storage and
-the rest. Your app builds an `EmailMessage` and hands it to the mailer binding; the
-adapter configured for the target decides how it is actually delivered. The protocol
-names no provider and no transport, so the same send runs unchanged on the native
-server and the Cloudflare Worker.
+Transactional email is a portable capability in PlumeKit, alongside the database, KV, object storage and the rest. Your app builds an `EmailMessage` and hands it to the mailer binding; the adapter configured for the target decides how it is actually delivered. The protocol names no provider and no transport, so the same send runs unchanged on the native server and the Cloudflare Worker.
 
 ## Enabling the capability
 
@@ -18,11 +14,11 @@ mailer = true
 mailer = "log"      # log | smtp
 ```
 
-Declaring `mailer = true` generates a typed, non-optional `request.bindings.mailer`
-accessor. (You can also read the optional `request.context.mailer` directly, e.g.
-from code without the generated bindings.)
+Declaring `mailer = true` generates a typed, non-optional `request.bindings.mailer` accessor. You can also read the optional `request.context.mailer` directly, for code without the generated bindings.
 
 ## Sending mail
+
+For a plain-text message, the convenience form takes the addresses and body directly:
 
 ```swift
 app.post("/signup") { request in
@@ -53,15 +49,11 @@ let message = EmailMessage(
 try await request.bindings.mailer.send(message)
 ```
 
-Addresses are plain `to@host` or `Name <to@host>`. `htmlBody` and `replyTo` are
-optional.
+Addresses are plain `to@host` or `Name <to@host>`. `htmlBody` and `replyTo` are optional.
 
 ## Plume-view email bodies
 
-Scaffolded apps include a small `Mailer` extension that sends a Plume-rendered HTML
-body with a plain-text fallback for clients that don't show HTML. Write the email as
-a `.plume` component (e.g. `@component WelcomeEmail(name: String) { … }`), render
-it and pass it in:
+Scaffolded apps include a small `Mailer` extension that sends a Plume-rendered HTML body with a plain-text fallback for clients that don't show HTML. Write the email as a `.plume` component (e.g. `@component WelcomeEmail(name: String) { … }`), render it and pass it in:
 
 ```swift
 try await Mailer.current.send(
@@ -71,10 +63,7 @@ try await Mailer.current.send(
     text: "Welcome, \(user.name)!")        // plain-text fallback
 ```
 
-The helper builds the `EmailMessage` for you: `htmlBody` from the rendered view,
-`textBody` from the fallback. The auth scaffold's verification and password-reset
-emails (`Views/Emails/VerifyEmail.plume`, `Views/Emails/ResetEmail.plume`) are both sent
-through exactly this helper.
+The helper builds the `EmailMessage` for you: `htmlBody` from the rendered view, `textBody` from the fallback. The auth scaffold's verification and password-reset emails (`Views/Emails/VerifyEmail.plume`, `Views/Emails/ResetEmail.plume`) are both sent through exactly this helper.
 
 ## The protocol
 
@@ -86,8 +75,7 @@ public protocol MailSender: Sendable {
 }
 ```
 
-The `Mailer` value carried on the request context is a concrete handle over such
-an adapter, exposing:
+The `Mailer` value carried on the request context is a concrete handle over such an adapter, exposing:
 
 ```swift
 public struct Mailer: Sendable {
@@ -97,9 +85,9 @@ public struct Mailer: Sendable {
 }
 ```
 
-A failed send throws `MailError`, which carries a human-readable `message`
-describing the failure (connection, auth or provider rejection). Wrap sends in
-`do`/`catch` if a delivery failure should not fail the request:
+### Handling failures
+
+A failed send throws `MailError`, which carries a human-readable `message` describing the failure (connection, auth or provider rejection). Wrap sends in `do`/`catch` if a delivery failure should not fail the request:
 
 ```swift
 do {
@@ -115,8 +103,7 @@ Two native drivers are available, selected by `[targets.native] mailer` in `plum
 
 ### `log` (the development default)
 
-The log driver prints the message instead of sending it, so you can see exactly what
-would go out (verification links, reset links) without running a mail server:
+The log driver prints the message instead of sending it, so you can see exactly what would go out (verification links, reset links) without running a mail server:
 
 ```
 [mail] ─────────────────────────────────────────
@@ -129,8 +116,7 @@ Thanks for signing up.
 
 ### `smtp`
 
-The `smtp` driver is a real SMTP client built on SwiftNIO. It is configured entirely
-from the environment:
+The `smtp` driver is a real SMTP client built on SwiftNIO. It is configured entirely from the environment:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -140,35 +126,19 @@ from the environment:
 | `SMTP_PASSWORD` | *(unset)* | Optional; used with the username |
 | `MAIL_FROM` | `no-reply@localhost` | Default `From:` when a message omits one |
 
-If both `SMTP_USERNAME` and `SMTP_PASSWORD` are set, the client authenticates with
-`AUTH LOGIN`; otherwise it sends without authentication.
+If both `SMTP_USERNAME` and `SMTP_PASSWORD` are set, the client authenticates with `AUTH LOGIN`; otherwise it sends without authentication.
 
-> **Limitation: no TLS/STARTTLS.** The native SMTP client speaks **plaintext** SMTP
-> (plus optional `AUTH LOGIN`). It does **not** implement STARTTLS or implicit TLS,
-> so credentials and message contents are sent unencrypted. This is fine for a local
-> mail catcher (such as MailHog or `aiosmtpd`) or an unauthenticated relay on a
-> trusted network. **Do not** use it to submit mail directly to a provider over the
-> public internet; either put it behind a local relay that adds TLS, or use the
-> Cloudflare adapter (which talks to an HTTPS provider API). TLS support is a planned
-> addition.
+> **Warning:** The native SMTP client has no TLS/STARTTLS: it speaks **plaintext** SMTP (plus optional `AUTH LOGIN`), so credentials and message contents are sent unencrypted. This is fine for a local mail catcher (such as MailHog or `aiosmtpd`) or an unauthenticated relay on a trusted network. **Do not** use it to submit mail directly to a provider over the public internet; either put it behind a local relay that adds TLS, or use the Cloudflare adapter (which talks to an HTTPS provider API). TLS support is a planned addition.
 
 ## Cloudflare adapter
 
-On the Cloudflare Worker target, the mailer serialises the message to JSON and hands
-it to a `host_email_send` host import; the generated `worker.mjs` shim POSTs that
-JSON to an HTTP email provider you configure (MailChannels, Resend, SendGrid or any
-provider) via the `MAIL_API_URL` and `MAIL_API_KEY` bindings in `wrangler.toml`. The
-provider-neutral JSON payload looks like:
+On the Cloudflare Worker target, the mailer serialises the message to JSON and hands it to a `host_email_send` host import; the generated `worker.mjs` shim POSTs that JSON to an HTTP email provider you configure (MailChannels, Resend, SendGrid or any provider) via the `MAIL_API_URL` and `MAIL_API_KEY` bindings in `wrangler.toml`. The provider-neutral JSON payload looks like:
 
 ```json
 { "from": "...", "to": "...", "subject": "...", "text": "...", "html": "...", "replyTo": "..." }
 ```
 
-On the edge the send is **fire-and-forget**: the adapter conforms to the throwing
-protocol but never throws; the JS shim logs any provider failure rather than
-surfacing it back into the Wasm module. Design important flows (e.g. a password
-reset) so the request succeeds even if the provider call fails, and rely on the shim
-logs for delivery diagnostics.
+On the edge the send is **fire-and-forget**: the adapter conforms to the throwing protocol but never throws; the JS shim logs any provider failure rather than surfacing it back into the Wasm module. Design important flows (e.g. a password reset) so the request succeeds even if the provider call fails, and rely on the shim logs for delivery diagnostics.
 
 ## Portability at a glance
 
@@ -180,5 +150,4 @@ logs for delivery diagnostics.
 | Throws on failure | no | yes (`MailError`) | no (shim logs) |
 | Config | none | `SMTP_*`, `MAIL_FROM` | `MAIL_API_URL`, `MAIL_API_KEY` |
 
-The `EmailMessage` you build and the `mailer.send(...)` you call are identical across
-all three; only the selected adapter differs.
+The `EmailMessage` you build and the `mailer.send(...)` you call are identical on every target; only the selected adapter differs. On AWS Lambda the mailer is backed by SES; see [Deploying to AWS Lambda](aws.md).

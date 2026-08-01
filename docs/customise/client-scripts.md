@@ -2,6 +2,8 @@
 
 `@script` blocks use Plume's client script language: a small, declarative way to wire up page behaviour that compiles to plain JavaScript. This page is the language reference. For when to reach for scripts at all, see [Behaviour](behaviour.md).
 
+A script queries elements, declares variables and attaches event handlers:
+
 ```plume
 @script {
   let menu = page.query("#menu")
@@ -27,6 +29,8 @@ Values can be strings, numbers, booleans, element queries and expressions built 
 
 - `page.query(selector)`: the first matching element.
 - `page.queryAll(selector)`: all matching elements, for loops.
+
+Loop over a query to touch every match:
 
 ```plume
 @script {
@@ -56,22 +60,25 @@ The target can be a selector string, a queried element or `page`. Inside a handl
 
 ## Element methods
 
-- `element.addClass(name)`
-- `element.removeClass(name)`
-- `element.toggleClass(name)` and `element.toggleClass(name, when: condition)`
-- `element.setText(value)`
-- `element.setAttribute(name, value)`
-- `element.removeAttribute(name)`
-- `element.setStyle(property, value)`
-- `element.removeStyle(property)`
-- `element.scrollTo()` and `element.scrollToTop()`
-- `element.focus()` and `element.blur()`
+| Method | Effect |
+|--------|--------|
+| `element.addClass(name)` | adds a class |
+| `element.removeClass(name)` | removes a class |
+| `element.toggleClass(name)` | toggles a class |
+| `element.toggleClass(name, when: condition)` | sets the class from a condition |
+| `element.setText(value)` | sets the element's text content |
+| `element.setAttribute(name, value)` | sets an attribute |
+| `element.removeAttribute(name)` | removes an attribute |
+| `element.setStyle(property, value)` | sets an inline style property |
+| `element.removeStyle(property)` | removes an inline style property |
+| `element.focus()` | focuses the element |
+| `element.blur()` | removes focus from the element |
 
 ## Page values and actions
 
 - `page.addClass`, `page.removeClass`, `page.toggleClass`: class helpers on the document element.
 - `page.scrollTo(...)` and `page.scrollToTop(...)`: scrolling helpers.
-- `page.scrollY` and `page.width`: read-only values for conditions.
+- `page.scrollY`, `page.scrollX`, `page.width` and `page.height`: read-only values for conditions.
 
 ## Control flow
 

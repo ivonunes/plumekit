@@ -1,9 +1,8 @@
 # Testing
 
-PlumeKit apps test natively with [Swift Testing](https://developer.apple.com/documentation/testing).
-The scaffold generates a `Tests/AppTests/` target and the **PlumeTesting** module, which
-gives each test a fresh, migrated in-memory database, a `TestHTTPClient`, model
-factories and response assertions. Run them with:
+PlumeKit apps test natively with [Swift Testing](https://developer.apple.com/documentation/testing). The scaffold generates a `Tests/AppTests/` target and wires in the **PlumeTesting** module, which gives each test a fresh, migrated in-memory database, a `TestHTTPClient`, model factories and response assertions.
+
+Run the suite with:
 
 ```sh
 plumekit test        # → swift test
@@ -11,9 +10,7 @@ plumekit test        # → swift test
 
 ## The harness
 
-`TestApp.boot` creates a fresh `:memory:` SQLite database, applies your migrations and
-binds everything (database, in-memory KV/cache/storage) into a `TestHTTPClient`. Build a
-new one per test so state never leaks:
+Every test starts from a clean slate. `TestApp.boot` creates a fresh `:memory:` SQLite database, applies your migrations and binds everything (database, in-memory KV/cache/storage) into a `TestHTTPClient`. Build a new one per test so state never leaks:
 
 ```swift
 import Testing
@@ -33,13 +30,11 @@ import PlumeTesting   // re-exports PlumeCore + PlumeORM
 }
 ```
 
-`@testable import App` lets tests reach your models and helpers (which are internal to
-the App module). `TestApp` exposes `app`, `client`, `database` and `context`.
+`@testable import App` lets tests reach your models and helpers (which are internal to the App module). `TestApp` exposes `app`, `client`, `database` and `context`.
 
 ## The client
 
-`app.client` is a `TestHTTPClient`: it dispatches requests through your app in-process
-(no sockets):
+`app.client` is a `TestHTTPClient`: it dispatches requests through your app in-process, with no sockets involved:
 
 ```swift
 await app.client.get("/posts")
@@ -48,15 +43,11 @@ await app.client.post("/api/posts", json: .object([(name: "title", value: .strin
 await app.client.get("/me", headers: .bearer(token))          // authenticated request
 ```
 
-`app.postForm` percent-encodes the fields and appends the harness's CSRF token,
-so a controller test is just the fields it cares about. The lower-level
-`app.client.postForm(_:fields:)` encodes without the token, and the raw string
-form (`app.client.postForm("/posts", "a=b")`) is still there for testing
-malformed bodies.
+`app.postForm` percent-encodes the fields and appends the harness's CSRF token, so a controller test is just the fields it cares about. The lower-level `app.client.postForm(_:fields:)` encodes without the token, and the raw string form (`app.client.postForm("/posts", "a=b")`) is still there for testing malformed bodies.
 
 ## Response assertions
 
-Convenience checks that read well inside `#expect`:
+Responses carry convenience checks that read well inside `#expect`:
 
 ```swift
 #expect(response.hasStatus(201))
@@ -71,14 +62,15 @@ if let json = response.decodedJSON() { … }
 
 ## Factories
 
-Define a `Factory` on a model: a builder for test (and seed) data. Factories live in
-`Sources/App/Database/Factories/` and work in both seeders and tests:
+Most tests need a row or two in the database first. A `Factory` on a model is a builder for that test (and seed) data. Factories live in `Sources/App/Database/Factories/` and work in both seeders and tests:
 
 ```swift
 extension Post {
     static let factory = Factory { Post(title: "Example", views: 0) }
 }
 ```
+
+With a factory defined, tests create records in one line:
 
 ```swift
 let post  = try await Post.factory.create(in: db)                    // INSERT, id populated
@@ -87,9 +79,9 @@ let hot   = try await Post.factory.create(in: db) { $0.views = 999 } // with ove
 let many  = try await Post.factory.createMany(3, in: db) { i, p in p.title = "Post \(i)" }
 ```
 
-### Unique / random values with `Fake`
+### Unique and random values with `Fake`
 
-For unique columns, use `Fake` (unique-ish random values) instead of static defaults:
+A static default breaks the moment a column has a unique constraint. For unique columns, use `Fake` (unique-ish random values) instead:
 
 ```swift
 extension User {
@@ -97,14 +89,11 @@ extension User {
 }
 ```
 
-`Fake.int(in:)`, `Fake.string(length:)`, `Fake.hex(_:)`, `Fake.email()`, `Fake.bool()`,
-`Fake.words(_:)`. Like factories, `Fake` runs on
-every target, so seeders that use it are portable.
+The helpers are `Fake.int(in:)`, `Fake.string(length:)`, `Fake.hex(_:)`, `Fake.email()`, `Fake.bool()` and `Fake.words(_:)`. Like factories, `Fake` runs on every target, so seeders that use it are portable.
 
 ## Testing auth
 
-Auth resolves the same from a cookie or a bearer token, so a test can log in and reuse
-the token as a bearer:
+Auth resolves the same from a cookie or a bearer token, so a test can log in once and reuse the token as a bearer:
 
 ```swift
 @Test func meRequiresAuth() async throws {
@@ -124,8 +113,9 @@ the token as a bearer:
 
 ## Generating tests
 
+The generators scaffold tests for you:
+
 - `plumekit generate test <Name>` scaffolds `Tests/AppTests/<Name>Tests.swift`.
-- `plumekit generate resource <Name> …` also emits a **factory** and a **test** for the
-  resource, which pass out of the box once the route and migration are wired.
+- `plumekit generate resource <Name> …` also emits a **factory** and a **test** for the resource, which pass out of the box once the route and migration are wired.
 
 See [Generators](generators.md).

@@ -2,7 +2,7 @@
 
 Plume is not trying to turn every website into an app. Its interactive layer is for small, local behaviour: disclosures, menus, filters, sliders, page transitions and progressive enhancement.
 
-When you are embedding Plume yourself, [Embedding](../embedding/index.md) explains when these features need the runtime.
+This page works through the layers in order, from plain state bindings to full client scripts. When you are embedding Plume yourself, [Embedding](../embedding/index.md) explains when these features need the runtime.
 
 ## Choosing a layer
 
@@ -16,7 +16,7 @@ Use the smallest layer that describes the behaviour:
 
 ## State
 
-Declare local state with `@state`:
+Sometimes markup needs a bit of local UI state: whether a disclosure is open, what a search field currently holds. Declare it with `@state`:
 
 ```plume
 @state expanded = false
@@ -32,15 +32,15 @@ Declare local state with `@state`:
 
 State can be rendered into:
 
-- Text content
-- Attributes
-- Conditional classes
-- Optional attributes
-- Inline style properties
+- Text content.
+- Attributes.
+- Conditional classes.
+- Optional attributes.
+- Inline style properties.
 
 State is local to the rendered page. It is not a persistence layer and it is not shared with the server.
 
-## Actions
+## State actions
 
 State actions are intentionally small:
 
@@ -51,12 +51,16 @@ on:click="{count.decrement()}"
 on:input="{query.set(event.value)}"
 ```
 
-Supported state actions:
+These are the supported state actions:
 
-- `name.toggle()`
-- `name.set(value)`
-- `name.increment()`
-- `name.decrement()`
+| Action | Effect |
+|--------|--------|
+| `name.toggle()` | flips a boolean value |
+| `name.set(value)` | assigns a new value |
+| `name.increment()` | adds one to a number |
+| `name.decrement()` | subtracts one from a number |
+
+### Form input values
 
 For form controls, `event.value` is available:
 
@@ -67,9 +71,9 @@ For form controls, `event.value` is available:
 <p hidden?="{query == ''}">Searching for {query}</p>
 ```
 
-## Browser
+## Page actions
 
-Use `page` for common browser actions:
+Some interactions are about the page itself rather than a piece of state. Use `page` for common browser actions:
 
 ```plume
 <button on:click="{page.scrollToTop(smooth: true)}">Top</button>
@@ -86,7 +90,7 @@ Supported page actions:
 
 Class actions target the document element by default. Pass `target: "body"` or another selector to target a specific element.
 
-## Measuring
+## Measuring elements
 
 Use `page.measure` when an interaction needs live element geometry but CSS should still do the animation:
 
@@ -115,7 +119,7 @@ By default, two `into` values receive the measured element's `x` and `width`. Pa
 
 Available properties include `x`, `y`, `width`, `height`, `top`, `left`, `right`, `bottom`, `viewportX`, `viewportY`, `centerX` and `centerY`.
 
-## Viewport
+## Viewport events
 
 `on:visible` fires when an element enters the viewport:
 
@@ -170,29 +174,30 @@ Use `@navigation` when same-origin links should fetch and swap page content inst
 
 Put it in a layout template when the whole site should use it.
 
-Available options:
+### Options
 
-- `root`: the selector for the element swapped on navigation (default `"body"`).
-- `viewTransitions`: animate swaps with the View Transitions API when the
-  browser supports it (default `true`).
-- `scroll`: `"top"`, `"preserve"` or `"none"` (default `"top"`).
-- `minimumDuration`: a minimum visit duration in milliseconds, useful to let a
-  leave animation finish (default `0`).
-- `progressBar`: show a slim progress bar at the top of the viewport while a
-  visit or intercepted form submission is in flight (default `true`). Set
-  `progressBar: false` to disable it.
-- `progressBarDelay`: how long a request must run, in milliseconds, before the
-  bar appears (default `500`), so fast navigations never flash it.
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `root` | `"body"` | the selector for the element swapped on navigation |
+| `viewTransitions` | `true` | animate swaps with the View Transitions API when the browser supports it |
+| `scroll` | `"top"` | `"top"`, `"preserve"` or `"none"` |
+| `minimumDuration` | `0` | a minimum visit duration in milliseconds |
+| `progressBar` | `true` | show a slim progress bar while a visit or intercepted form submission is in flight |
+| `progressBarDelay` | `500` | how long a request must run, in milliseconds, before the bar appears |
 
-The progress bar needs no app CSS: the runtime injects its own namespaced
-style (`.plume-progress-bar`, 3px tall, fixed to the top of the viewport). To
-match your brand, override its colour from plain CSS with a custom property:
+`minimumDuration` is useful to let a leave animation finish. `progressBarDelay` exists so fast navigations never flash the bar. Set `progressBar: false` to disable the bar entirely.
+
+### The progress bar
+
+The progress bar needs no app CSS: the runtime injects its own namespaced style (`.plume-progress-bar`, 3px tall, fixed to the top of the viewport). To match your brand, override its colour from plain CSS with a custom property:
 
 ```css
 :root {
   --plume-progress-color: #16a34a;
 }
 ```
+
+### Hooks
 
 Available hooks:
 
@@ -201,5 +206,7 @@ Available hooks:
 - `on:afterSwap`
 - `on:complete`
 - `on:error`
+
+### Opting out
 
 Use `data-plume-navigation="false"` on a link to opt out.

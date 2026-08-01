@@ -1,45 +1,77 @@
 # CLI & configuration
 
-`plumekit` is the single CLI that scaffolds, runs, migrates, builds and deploys your
-app, and drives the Plume templating toolchain in-process. This page is the command
-and configuration reference.
+`plumekit` is one binary that scaffolds, runs, migrates, builds and deploys your app. It also drives the Plume templating toolchain in-process. This page is the command and configuration reference.
 
 ## The `./plumekit` wrapper
 
-Every scaffolded project includes a committed `./plumekit` wrapper script. It reads
-the PlumeKit version your project resolves to from `Package.resolved` (the SwiftPM
-lock file), downloads the matching CLI release from
-GitHub on first use, verifies its checksum, caches it and runs it. Contributors
-and CI need nothing installed beyond a Swift toolchain: run `./plumekit …` and you
-get the version your app builds against.
+Every scaffolded project includes a committed `./plumekit` wrapper script. It reads the PlumeKit version your project resolves to from `Package.resolved` (the SwiftPM lock file), downloads the matching CLI release from GitHub on first use, verifies its checksum, caches it and runs it.
 
-Overrides: `PLUMEKIT_BIN=/path/to/plumekit` (use a local build), `PLUMEKIT_VERSION=x.y.z`.
+Contributors and CI therefore need nothing installed beyond a Swift toolchain: run `./plumekit …` and you get the version your app builds against.
+
+Two environment variables override the wrapper. `PLUMEKIT_BIN=/path/to/plumekit` runs a local build instead, and `PLUMEKIT_VERSION=x.y.z` pins a specific release.
 
 ## Commands
 
+Most commands take an optional `[path]` naming the project directory; it defaults to the current directory.
+
 | Command | What it does |
 | --- | --- |
-| `plumekit new <name>` | Scaffold a new app. Interactive at a TTY (capabilities, target, DB driver, Dockerfile, CI); use defaults otherwise. `--path <dir>` depends on a local framework checkout. |
-| `plumekit serve [path]` | Run the app natively. `--host`, `--port`. |
-| `plumekit dev [path]` | Serve, rebuilding on source/template/config changes: the old server keeps running until the new build succeeds, then swaps in — and open browser pages reload themselves on the swap. |
-| `plumekit console [path]` | Interactive REPL against the app + native bindings; type `GET /path`. |
-| `plumekit migrate [path]` | Apply migrations against the native DB. `--local` / `--remote` target a Cloudflare D1 (`--remote` over the Cloudflare API with `CLOUDFLARE_API_TOKEN`, wrangler otherwise; add `--env <name>` for an environment's D1). `--rollback [N]` reverses the newest N; `--status` lists each migration as up/down (both native-DB only). |
-| `plumekit seed [path]` | Run the app's seeders (same `--local` / `--remote`). |
+| `plumekit new <name>` | Scaffold a new app. |
+| `plumekit serve [path]` | Run the app natively. |
+| `plumekit dev [path]` | Serve, rebuilding on file changes. |
+| `plumekit console [path]` | Interactive REPL against the app. |
+| `plumekit migrate [path]` | Apply pending migrations. |
+| `plumekit seed [name] [path]` | Run the app's seeders, or just one. |
 | `plumekit routes [path]` | List the app's registered routes. |
-| `plumekit generate <kind> …` | Scaffold a resource, model, controller, migration, view, middleware, job, seeder, test, auth, notifications or CI. Alias: `g`. See [Generators](generators.md). |
-| `plumekit test [path]` | Run the app's test suite. Extra flags pass straight to `swift test` (`plumekit test --filter PostTests`). |
-| `plumekit doctor` | Report the per-target toolchain state (Swift, wasm SDK, wasm-opt, Cloudflare auth, libpq, aws, docker). |
+| `plumekit generate <kind> …` | Scaffold code or CI workflows (alias: `g`). |
+| `plumekit test [path]` | Run the app's test suite. |
+| `plumekit doctor` | Report the per-target toolchain state. |
 | `plumekit mcp` | Run an MCP server (stdio) giving AI coding agents accurate PlumeKit APIs; see [MCP for AI agents](mcp.md). |
-| `plumekit build [path]` | Build the target(s) from `[build]` (or `--target cloudflare\|aws\|all`). `--env <name>` builds for a [deploy environment](deploying.md#deploy-environments). |
-| `plumekit deploy [path]` | Migrate, (seed,) build and deploy; see [Deploying](deploying.md). `--env <name>` deploys an environment. |
-| `plumekit secret set <NAME> [path]` | Set a worker secret over the Cloudflare API (value via hidden prompt or stdin). `secret list` lists them; `--env <name>` targets an environment's worker. |
-| `plumekit token` | Open the dashboard's create-token page pre-filled with the permissions deploys need. |
-| `plumekit login` | Store a verified Cloudflare API token (and a default account) for deploys. `logout` forgets it. |
+| `plumekit build [path]` | Build the deployable target(s). |
+| `plumekit deploy [path]` | Migrate, seed, build and deploy. |
+| `plumekit secret set <NAME> [path]` | Set a deploy secret (`secret list` lists them). |
+| `plumekit token` | Open the pre-filled deploy-token creation page. |
+| `plumekit login` | Store deploy credentials (`logout` forgets them). |
+| `plumekit version` | Print the CLI version. |
 
-The Plume templating commands (`compile`, `check`, `bundle`, `format`,
-`language-server`) are part of the same binary; see [Tooling](tooling/index.md).
+The Plume templating commands (`compile`, `check`, `bundle`, `format`, `language-server`) are part of the same binary; see [Tooling](tooling/index.md).
 
-### `plumekit generate`
+### Creating an app
+
+`plumekit new <name>` scaffolds a new app. At a TTY it asks a short series of questions (capabilities, build target, database driver, Dockerfile, CI); otherwise it takes the defaults. `--path <dir>` makes the new app depend on a local framework checkout instead of the released package.
+
+### Running the app
+
+`plumekit serve` builds and runs the native server, on `127.0.0.1:8080` unless you pass `--host` or `--port`. `plumekit dev` does the same but rebuilds on source, template and config changes: the old server keeps running until the new build succeeds, then swaps in, and open browser pages reload themselves on the swap.
+
+`plumekit console` starts an interactive REPL against the app with the native bindings attached; type `GET /path` to exercise a route.
+
+### Migrations and seeding
+
+`plumekit migrate` applies pending migrations against the native database. `plumekit seed` runs the app's seeders; `plumekit seed Demo` runs just the one named. Both accept the same flags for targeting a Cloudflare D1:
+
+| Flag | Meaning |
+| --- | --- |
+| `--local` / `--remote` | Target a Cloudflare D1 instead of the native database. |
+| `--env <name>` | Target a [deploy environment](deploying.md#deploy-environments)'s D1; requires `--local` or `--remote`. |
+| `--db <name>` | Name the D1 database explicitly. |
+| `--yes`, `-y` | Skip wrangler's confirmation prompts. |
+| `--rollback [N]` | Reverse the newest N migrations (default 1); `migrate` only. |
+| `--status` | List each migration as applied or pending; `migrate` only. |
+
+`--remote` goes over the Cloudflare API when a token is available (`CLOUDFLARE_API_TOKEN` or a stored `plumekit login`), and through wrangler otherwise; `--local` always uses wrangler, because the local D1 lives in its simulator state. `--rollback` and `--status` work against the native database only: D1 migrations are applied as forward-only SQL batches, so write a new migration to undo one. See [Migrations](migrations.md).
+
+### Testing
+
+`plumekit test` runs the app's test suite. Extra flags pass straight through to `swift test`:
+
+```sh
+plumekit test --filter PostTests
+```
+
+### Generating code
+
+`plumekit generate <kind>` (alias `g`) scaffolds a resource, model, controller, migration, view, middleware, job, seeder, test, auth, notifications or CI:
 
 ```sh
 plumekit generate resource Post title:string body:text published:bool  # model + controller + views + migration
@@ -49,22 +81,29 @@ plumekit generate migration add_index
 plumekit generate ci --provider github         # or gitlab | forgejo
 ```
 
-Kinds: `resource`, `model`, `controller`, `migration`, `view`, `middleware`, `job`,
-`seeder`, `test`, `auth`, `notifications`, `ci`. Generators never overwrite a file and print how to wire what
-they create. They run against the project root: from a subdirectory the CLI walks up to
-find it, or point at it with `--path <dir>`. A generator whose output needs a
-capability the app has off (`resource`/`model` need `database`; `auth` also needs
-`kv` and `secrets`) offers to enable it in `plumekit.toml`, or says exactly what to
-flip. `generate ci` writes a test-on-PR workflow and a deploy-on-push workflow
-(which runs `./plumekit deploy`), tailored to your default build target. The full
-reference, including the `resource` scaffold and the `auth` flow, is in
-**[Generators](generators.md)**.
+Generators never overwrite a file, and each one prints how to wire what it creates. They run against the project root: from a subdirectory the CLI walks up to find it, or you point at it with `--path <dir>`.
+
+A generator whose output needs a capability the app has off (`resource` and `model` need `database`; `auth` also needs `kv` and `secrets`) offers to enable it in `plumekit.toml`, or says exactly what to flip. `generate ci` writes a test-on-PR workflow and a deploy-on-push workflow (which runs `./plumekit deploy`), tailored to your default build target.
+
+The full reference, including the `resource` scaffold and the `auth` flow, is in [Generators](generators.md).
+
+### Building and deploying
+
+`plumekit build` builds the target(s) declared in `[build]` in `plumekit.toml`, or the one you name with `--target cloudflare|aws|all`. `plumekit deploy` migrates, optionally seeds, builds and deploys. Both take `--env <name>` to work on a [deploy environment](deploying.md#deploy-environments). See [Deploying](deploying.md) for the whole flow.
+
+### Secrets and credentials
+
+`plumekit secret set NAME` sets a worker secret over the Cloudflare API. The value is read from a hidden prompt, or from stdin when piped, never from the command line. `plumekit secret list` lists the names. Both take `--env <name>` to target an environment's worker.
+
+`plumekit login` stores a verified Cloudflare API token (and a default account) for deploys; `plumekit logout` forgets it. `plumekit token` opens the dashboard's create-token page pre-filled with the permissions deploys need. All three accept an optional provider argument and default to the app's default target; Cloudflare is the only provider with a credential store today (AWS uses its own credential chain).
+
+### Checking the toolchain
+
+`plumekit doctor` reports the state of each target's toolchain: Swift, the Embedded WebAssembly SDK, wasm-opt, Cloudflare auth, node, libpq, the aws CLI and docker.
 
 ## `plumekit.toml`
 
-The project manifest declares your capabilities and per-target configuration. The
-build-tool plugin reads it on every `swift build` to generate the typed `Bindings`
-gate and the composition root; the CLI reads its `[build]` / `[deploy]` sections.
+The project manifest declares your capabilities and per-target configuration. The build-tool plugin reads it on every `swift build` to generate the typed `Bindings` gate and the composition root; the CLI reads its `[build]` and `[deploy]` sections:
 
 ```toml
 # Which capabilities the app uses. Using one not declared here is a compile error
@@ -77,6 +116,7 @@ cache    = false
 queue    = false
 http     = false
 secrets  = false
+mailer   = false
 
 # `plumekit build`/`deploy` with no --target use `default`; `--target all` covers
 # every entry in `targets`. `--target <name>` overrides.
@@ -111,16 +151,11 @@ queue    = "sqs"
 secrets  = "ssm"
 ```
 
-Enabling a capability generates a typed, non-optional accessor on `request.bindings`
-(e.g. `request.bindings.database`). Switching a driver and rebuilding relinks a
-different adapter with no app-code change; see [Bindings & drivers](bindings.md) and
-[Portability](portability.md).
+Enabling a capability generates a typed, non-optional accessor on `request.bindings` (for example `request.bindings.database`). Switching a driver and rebuilding relinks a different adapter with no app-code change. See [Bindings & the capability model](bindings.md) and [Portability](portability.md).
 
 ## `.env`
 
-`serve`, `dev`, `console`, `migrate` and `seed` load a `.env` file from the project
-root into the environment (existing variables win), so `DATABASE_URL`, secrets and
-other config are picked up without hand-exporting:
+`serve`, `dev`, `console`, `routes`, `migrate` and `seed` load a `.env` file from the project root into the environment (existing variables win), so `DATABASE_URL`, secrets and other config are picked up without hand-exporting:
 
 ```sh
 # .env

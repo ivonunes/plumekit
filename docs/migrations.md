@@ -1,11 +1,8 @@
 # Migrations
 
-Versioned schema changes. Each migration is a file that describes one change with an
-explicit `up` (and an optional `down` to reverse it). Migrations run in order, once
-each, and are discovered automatically, so you never maintain a central list.
+Migrations are versioned schema changes. Each migration is a file that describes one change with an explicit `up` (and an optional `down` to reverse it). Migrations run in order, once each, and are discovered automatically, so you never maintain a central list.
 
-They talk only to the neutral `Database`, so the same migrations run on native SQLite,
-Cloudflare D1 and Postgres; the dialect travels with the handle.
+Migrations talk only to the neutral `Database`, so the same migrations run on native SQLite, Cloudflare D1 and Postgres; the dialect travels with the handle.
 
 ## Writing a migration
 
@@ -16,8 +13,7 @@ plumekit generate migration CreatePosts
 #   + Sources/App/Database/Migrations/20260101120000_CreatePosts.swift
 ```
 
-The filename is timestamped so migrations order by creation time and two branches
-never collide on the same number. Fill in the change with the schema builder:
+The filename is timestamped so migrations order by creation time and two branches never collide on the same number. Fill in the change with the schema builder:
 
 ```swift
 import PlumeORM
@@ -39,13 +35,29 @@ let createPosts = Migration(
 )
 ```
 
-Columns are `text`, `integer`, `real`, `boolean`, `uuid`, `blob` and `id()` for the
-primary key; each takes `nullable: true` for an optional column. Non-nullable columns
-get `NOT NULL`. Spelling the schema out keeps the migration a **frozen record**: it
-does not read the live `@Model`, so editing a model later never rewrites past
-migrations.
+Spelling the schema out keeps the migration a **frozen record**: it does not read the live `@Model`, so editing a model later never rewrites past migrations.
+
+### Column types
+
+The builder offers one method per column type:
+
+| Method | Creates |
+| --- | --- |
+| `t.id()` | the primary key |
+| `t.text(_)` | a text column |
+| `t.integer(_)` | an integer column |
+| `t.real(_)` | a floating-point column |
+| `t.boolean(_)` | a boolean column |
+| `t.uuid(_)` | a UUID column |
+| `t.blob(_)` | a binary column |
+| `t.references(_, table:)` | a `<name>_id` column plus a foreign key |
+| `t.timestamps()` | `created_at` and `updated_at` |
+
+Each column method takes `nullable: true` for an optional column. Non-nullable columns get `NOT NULL`.
 
 ## Altering a table
+
+To change an existing table, use `alterTable`:
 
 ```swift
 let addSlug = Migration(
@@ -64,8 +76,9 @@ let addSlug = Migration(
 )
 ```
 
-`renameTable`, `dropIndex` and `addReference` round out the set. Renaming and dropping
-columns need SQLite 3.25+/3.35+; Cloudflare D1 and recent SQLite have both.
+`renameTable`, `dropIndex` and `addReference` round out the set.
+
+> **Note:** Renaming and dropping columns need SQLite 3.25+/3.35+; Cloudflare D1 and recent SQLite have both.
 
 ## Raw SQL
 
@@ -75,8 +88,7 @@ For anything the builder doesn't cover, run SQL directly in the closure:
 up: { db in _ = try await db.query("CREATE TABLE ... CHECK (...)", []) }
 ```
 
-Or write the whole migration as SQL with `Migration.sql`, which splits `up`/`down`
-into `;`-terminated statements:
+Or write the whole migration as SQL with `Migration.sql`, which splits `up`/`down` into `;`-terminated statements:
 
 ```swift
 let m = Migration.sql(
@@ -88,8 +100,7 @@ let m = Migration.sql(
 
 ## Running migrations
 
-`plumekit migrate` applies every pending migration against the configured database.
-For Cloudflare D1, choose where they run:
+`plumekit migrate` applies every pending migration against the configured database. For Cloudflare D1, choose where they run:
 
 ```sh
 plumekit migrate            # native database (SQLite/Postgres, per plumekit.toml)
@@ -97,9 +108,9 @@ plumekit migrate --local    # the local D1 (wrangler's local SQLite)
 plumekit migrate --remote   # the deployed D1
 ```
 
-The `Migrator` records what has run in a `schema_migrations` ledger (`version`,
-`applied_at`), so re-running is a no-op. `plumekit deploy` runs migrations for you as
-part of a deploy, controlled by the `[deploy]` section of `plumekit.toml`.
+The `Migrator` records what has run in a `schema_migrations` ledger (`version`, `applied_at`), so re-running is a no-op. `plumekit deploy` runs migrations for you as part of a deploy, controlled by the `[deploy]` section of `plumekit.toml`.
+
+On the native drivers, each migration and its ledger row are applied (and rolled back) in one transaction, so a failed script leaves nothing half-applied.
 
 ### Rollback and status
 
@@ -111,8 +122,7 @@ plumekit migrate --rollback      # reverse the most recent (its down:)
 plumekit migrate --rollback 3    # reverse the last three
 ```
 
-The same operations exist as Swift APIs on the `Migrator` (the set is
-`plumeKitMigrations`, the generated list of your migration files):
+The same operations exist as Swift APIs on the `Migrator` (the set is `plumeKitMigrations`, the generated list of your migration files):
 
 ```swift
 let migrator = Migrator(plumeKitMigrations)
@@ -120,23 +130,17 @@ try await migrator.rollback(in: db, steps: 1)   // reverse the most recent, runn
 let states = try await migrator.status(in: db)  // each migration and whether it's applied
 ```
 
-A migration with no `down` throws `MigrationError.irreversible`. Each migration
-and its ledger row are applied (and rolled back) in one transaction on the native
-drivers, so a failed script leaves nothing half-applied. D1 is forward-only: to
-undo something there, write a new migration.
+A migration with no `down` throws `MigrationError.irreversible`.
 
-Statements Postgres refuses inside a transaction block (`CREATE INDEX
-CONCURRENTLY`, `VACUUM`) go in a migration marked `transactional: false`
-(`Migration(version:transactional:up:down:)` or
-`Migration.sql(version:transactional:up:down:)`). Keep those to one statement:
-without the wrapper, a mid-script failure leaves whatever ran behind.
+> **Warning:** D1 is forward-only: to undo something there, write a new migration.
+
+### Non-transactional migrations
+
+Some statements refuse to run inside a transaction block on Postgres (`CREATE INDEX CONCURRENTLY`, `VACUUM`). Put those in a migration marked `transactional: false` (`Migration(version:transactional:up:down:)` or `Migration.sql(version:transactional:up:down:)`). Keep those migrations to one statement: without the wrapper, a mid-script failure leaves whatever ran behind.
 
 ### Adopting an existing database
 
-To introduce migrations onto a database that already has the tables, pass
-`adoptExistingTable:`. When the ledger is empty but that table already exists, every
-migration is recorded as applied *without running*, so a live schema is never
-re-created:
+To introduce migrations onto a database that already has the tables, pass `adoptExistingTable:`. When the ledger is empty but that table already exists, every migration is recorded as applied *without running*, so a live schema is never re-created:
 
 ```swift
 try await migrator.migrate(in: db, adoptExistingTable: "posts")
@@ -144,14 +148,16 @@ try await migrator.migrate(in: db, adoptExistingTable: "posts")
 
 ## Seeders
 
-Seeders are files under `Sources/App/Database/Seeders/`, also discovered
-automatically. A `Seeder` inserts rows; make it idempotent (upsert) if it may run more
-than once:
+Seeders fill the database with rows: sample content for development, or baseline records an app needs. They are files under `Sources/App/Database/Seeders/`, also discovered automatically.
+
+Create one with the generator:
 
 ```sh
 plumekit generate seeder Posts
 #   + Sources/App/Database/Seeders/PostsSeeder.swift
 ```
+
+A `Seeder` inserts rows; make it idempotent (upsert) if it may run more than once:
 
 ```swift
 import PlumeORM
@@ -172,8 +178,4 @@ plumekit seed posts    # run just PostsSeeder
 
 ## Dialects
 
-The same migrations run on every SQL target. The builder renders dialect-correct DDL
-from the handle (e.g. `INTEGER PRIMARY KEY AUTOINCREMENT` on SQLite/D1 versus
-`SERIAL PRIMARY KEY` on Postgres), so a migration stays identical across targets. If
-you hand-write SQL that differs between engines, that's the one place to mind the
-dialect. See [Portability](portability.md).
+The same migrations run on every SQL target. The builder renders dialect-correct DDL from the handle (e.g. `INTEGER PRIMARY KEY AUTOINCREMENT` on SQLite/D1 versus `SERIAL PRIMARY KEY` on Postgres), so a migration stays identical across targets. If you hand-write SQL that differs between engines, that's the one place to mind the dialect. See [Portability](portability.md).

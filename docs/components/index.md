@@ -1,10 +1,10 @@
 # Components
 
-Components keep repeated markup in one place without hiding the HTML shape of the page. Define them with `@component`, then call them by name.
+Components keep repeated markup in one place without hiding the HTML shape of the page. You define a component once with `@component`, then call it by name wherever you need it. Content flows in through arguments and slots, and Plume checks every call against the definition.
 
-## Define
+## Defining components
 
-Component names use PascalCase:
+Component names use PascalCase. Define a component with `@component`, then call it with `@` and its name:
 
 ```plume
 @component PostCard(post, tone = "default") {
@@ -21,21 +21,9 @@ Component names use PascalCase:
 
 Arguments can be positional, named or mixed. Named arguments are clearer once a component accepts more than one optional value.
 
-## APIs
+## Default values
 
-Keep the first argument the thing the component renders, then make options named:
-
-```plume
-@PostCard(post, tone: "featured", showMeta: false)
-```
-
-This keeps call sites readable as components grow. Use defaults for options that should usually disappear from the call site.
-
-Prefer slots for real content and arguments for data or small display options. If a caller needs to pass headings, paragraphs, lists or buttons, a slot usually reads better than a long string argument.
-
-## Defaults
-
-Parameters can have default values:
+Parameters can have default values, so callers only mention what differs:
 
 ```plume
 @component Button(label, variant = "plain") {
@@ -48,7 +36,7 @@ Parameters can have default values:
 
 ## Slots
 
-`@slot` renders the trailing content passed to a component:
+Sometimes a caller needs to pass markup, not just values. `@slot` renders the trailing content passed to a component:
 
 ```plume
 @component Panel(title) {
@@ -62,6 +50,8 @@ Parameters can have default values:
   <p>Working on Plume.</p>
 }
 ```
+
+### Fallback content
 
 Slots can include fallback content:
 
@@ -77,7 +67,7 @@ Slots can include fallback content:
 
 The fallback renders only when the caller does not pass trailing content.
 
-## Named slots
+### Named slots
 
 Use named slots when a component has multiple content areas:
 
@@ -113,6 +103,34 @@ Use named slots when a component has multiple content areas:
 
 `@content` is only valid directly inside a component call. This keeps the ownership of named slots clear.
 
+## Composition
+
+Components can call other components:
+
+```plume
+@component PostList(posts) {
+  <ul class="post-list">
+    @for post in posts {
+      @PostCard(post)
+    }
+  </ul>
+}
+```
+
+Keep components focused. A component that owns layout, data selection, styling and interaction all at once is harder to reuse than a component with one clear job.
+
+## Designing component APIs
+
+Keep the first argument the thing the component renders, then make options named:
+
+```plume
+@PostCard(post, tone: "featured", showMeta: false)
+```
+
+This keeps call sites readable as components grow. Use defaults for options that should usually disappear from the call site.
+
+Prefer slots for real content and arguments for data or small display options. If a caller needs to pass headings, paragraphs, lists or buttons, a slot usually reads better than a long string argument.
+
 ## Resources
 
 Components can carry the styles and scripts they need:
@@ -136,23 +154,9 @@ Components can carry the styles and scripts they need:
 
 Scoped styles are limited to the rendered component fragment. State and event bindings make the component interactive when the host emits the Plume runtime.
 
-## Composition
+See [Resources](../customise/resources.md) for how hosts emit styles and scripts, and [Behaviour](../customise/behaviour.md) for `@state` and event bindings.
 
-Components can call other components:
-
-```plume
-@component PostList(posts) {
-  <ul class="post-list">
-    @for post in posts {
-      @PostCard(post)
-    }
-  </ul>
-}
-```
-
-Keep components focused. A component that owns layout, data selection, styling and interaction all at once is harder to reuse than a component with one clear job.
-
-## Errors
+## Error checking
 
 Plume checks component calls against their definitions. Unknown arguments and duplicate arguments are reported as template errors:
 
@@ -164,7 +168,7 @@ That makes component APIs safer to evolve than loose includes or partials.
 
 Plume also guards against runaway recursion. A component that calls itself, directly or through other components, is reported as a template error past a depth limit instead of hanging the render.
 
-## Loading
+## Loading components
 
 Plume itself does not require a component folder. Hosts decide which component sources to provide to a template environment.
 
@@ -177,4 +181,4 @@ theme/
     PageSection.plume
 ```
 
-Inside a Swift host, pass component sources through `PlumeTemplateEnvironment`.
+Inside a Swift host, pass component sources through `PlumeTemplateEnvironment`. See [Embedding](../embedding/index.md) for the host API.

@@ -1,25 +1,20 @@
 # Tutorial: build a bookmarks app
 
-This tutorial builds a small but complete PlumeKit app: a bookmarks list you can add
-to and delete from, with server-side validation. It's the shape of a real app, so
-along the way you'll use the pieces you'd reach for every day:
+This tutorial builds a small but complete PlumeKit app: a bookmarks list you can add to and delete from, with server-side validation. It has the shape of a real app, so along the way you use the pieces you would reach for every day. It takes about 20 minutes, and every snippet is copy-paste-ready.
 
-- **routing through a controller**: the conventional RESTful actions, wired in one call,
-- **Plume views**: HTML templates split across files, with a shared layout,
-- **the ORM**: an `@Model` type, explicit migrations, typed queries,
-- **forms**: reading a POST, validating it and re-rendering errors,
-- **flash messages**: a one-time notice after a redirect.
+By the end you will know how to:
 
-It should take about 20 minutes. Every snippet is copy-paste-ready. If you just want
-the reference for each feature, browse the docs sidebar; this page is the hands-on
-path.
+- Wire the conventional RESTful actions through a controller, in one call
+- Build Plume views: HTML templates split across files, with a shared layout
+- Use the ORM: an `@Model` type, explicit migrations and typed queries
+- Handle a form: read a POST, validate it and re-render errors
+- Show a flash message: a one-time notice after a redirect
 
-> **Prerequisites:** a Swift 6.3 toolchain (`swift --version`). You'll run the
-> `plumekit` CLI, either the `./plumekit` wrapper in a scaffolded project (it
-> downloads the matching release for you) or a local build of the framework. See
-> [Getting started](getting-started.md#install-the-cli).
+If you just want the reference for each feature, browse the docs sidebar; this page is the hands-on path.
 
-## 1. Scaffold and run
+> **Note:** You need a Swift 6.3 toolchain (`swift --version`) and the `plumekit` CLI: either the `./plumekit` wrapper in a scaffolded project (it downloads the matching release for you) or a local build of the framework. See [Getting started](getting-started.md#installing-the-cli).
+
+## 1. Scaffolding and running
 
 Create the app and start it:
 
@@ -30,10 +25,7 @@ cd bookmarks
 #   → native server on http://127.0.0.1:8080, restarting on every change
 ```
 
-`plumekit new` asks a few questions. Turn **database** on when it asks about
-capabilities (space toggles it); accept the defaults for everything else. Open
-<http://127.0.0.1:8080/> and you'll see the starter page. Leave `dev` running in this
-terminal; it rebuilds and restarts whenever you save a file.
+`plumekit new` asks a few questions. Turn **database** on when it asks about capabilities (space toggles it); accept the defaults for everything else. Open <http://127.0.0.1:8080/> and you'll see the starter page. Leave `dev` running in this terminal; it rebuilds and restarts whenever you save a file.
 
 Take a quick look around:
 
@@ -51,8 +43,7 @@ bookmarks/
     HomePage.plume           # a page that fills the layout
 ```
 
-Everything runs through `buildApp()` in `Sources/App/App.swift`. The native server
-and the Cloudflare Worker both call it, so your app behaves identically on each.
+Everything runs through `buildApp()` in `Sources/App/App.swift`. The native server and the Cloudflare Worker both call it, so your app behaves identically on each.
 
 ## 2. A model and a migration
 
@@ -69,22 +60,18 @@ final class Bookmark: Model {
 }
 ```
 
-`@Model` reads the type at compile time and emits the table schema, a row codec and
-typed query columns. The table name is the pluralised, snake-cased type name: here,
-`bookmarks`.
+`@Model` reads the type at compile time and emits the table schema, a row codec and typed query columns. The table name is the pluralised, snake-cased type name: here, `bookmarks`.
 
-Migrations are individual files under `Sources/App/Database/Migrations/`. They run in
-filename order and are discovered automatically, you don't register them anywhere.
-Create one:
+### Creating the table
+
+The table itself comes from a migration. Migrations are individual files under `Sources/App/Database/Migrations/`; they run in filename order and are discovered automatically, so you don't register them anywhere. Create one:
 
 ```sh
 ./plumekit generate migration CreateBookmarks
 #   + Sources/App/Database/Migrations/20260101120000_CreateBookmarks.swift
 ```
 
-Open that file and describe the change explicitly with the schema builder. Spelling
-the columns out keeps the migration a frozen record: editing the `Bookmark` model
-later never rewrites it.
+Open that file and describe the change explicitly with the schema builder:
 
 ```swift
 import PlumeORM
@@ -102,8 +89,7 @@ let createBookmarks = Migration(
 )
 ```
 
-The builder covers creating, altering, renaming and dropping tables, columns,
-foreign keys and indexes. For anything it doesn't, run `db.query("...")` directly.
+Spelling the columns out keeps the migration a frozen record: editing the `Bookmark` model later never rewrites it. The builder covers creating, altering, renaming and dropping tables, columns, foreign keys and indexes. For anything it doesn't, run `db.query("...")` directly.
 
 Apply it:
 
@@ -113,16 +99,15 @@ Apply it:
 #     + 20260101120000_create_bookmarks
 ```
 
-The `Migrator` records what has run in a `schema_migrations` ledger, so re-running is
-a no-op. See [Migrations](../migrations.md) for altering tables, rollbacks and
-seeders.
+The `Migrator` records what has run in a `schema_migrations` ledger, so re-running is a no-op. See [Migrations](../migrations.md) for altering tables, rollbacks and seeders.
 
 ## 3. A page, split across view files
 
-PlumeKit's view layer is **Plume**: `.plume` templates that compile to render
-functions your handlers call. Split views across files: a shared **layout** plus one
-file per page. The scaffold already set up `Views/Layout.plume` as the page shell,
-where `@slot` is the hole a page's content fills:
+PlumeKit's view layer is **Plume**: `.plume` templates that compile to render functions your handlers call. Views are split across files: a shared **layout** plus one file per page.
+
+### The layout
+
+The scaffold already set up `Views/Layout.plume` as the page shell, where `@slot` is the hole a page's content fills:
 
 ```plume
 @component Layout(title: String) {<!doctype html>
@@ -132,8 +117,9 @@ where `@slot` is the hole a page's content fills:
 </html>}
 ```
 
-Create the bookmarks page, `Views/BookmarksPage.plume`. It takes the list to show and
-an optional error message, and calls `@Layout` for the shell:
+### The bookmarks page
+
+Create the bookmarks page, `Views/BookmarksPage.plume`. It takes the list to show and an optional error message, and calls `@Layout` for the shell:
 
 ```plume
 @component BookmarksPage(bookmarks: [Bookmark], error: String = "") {@Layout(title: "Bookmarks") {
@@ -169,21 +155,15 @@ an optional error message, and calls `@Layout` for the shell:
 
 A few things to notice:
 
-- `{title}` and `{bookmark.title}` are **HTML-escaped by default**, so untrusted
-  values are safe. `@if` / `@for` are control flow.
-- `@csrf` renders the hidden token that form protection (on by default) checks on
-  every POST. It's automatic: nothing to pass into the view, nothing to wire up in
-  the handler.
-- HTML forms can only GET or POST, so the delete form POSTs with a hidden
-  `_method=delete` field; PlumeKit routes it to the controller's `destroy` action.
+- `{title}` and `{bookmark.title}` are **HTML-escaped by default**, so untrusted values are safe. `@if` / `@for` are control flow.
+- `@csrf` renders the hidden token that form protection (on by default) checks on every POST. It's automatic: nothing to pass into the view, nothing to wire up in the handler.
+- HTML forms can only GET or POST, so the delete form POSTs with a hidden `_method=delete` field; PlumeKit routes it to the controller's `destroy` action.
 
-See [Components](../components/index.md) and [Syntax](../syntax/index.md) for the full
-language.
+See [Components](../components/index.md) and [Syntax](../syntax/index.md) for the full language.
 
 ## 4. A controller
 
-Rather than scatter closures in `buildApp()`, group the bookmark actions in a
-controller. Create `Sources/App/Controllers/BookmarksController.swift`:
+Rather than scatter closures in `buildApp()`, group the bookmark actions in a controller. Create `Sources/App/Controllers/BookmarksController.swift`:
 
 ```swift
 import PlumeCore
@@ -220,17 +200,13 @@ struct BookmarksController: Controller {
 }
 ```
 
-`Controller` gives every action a default "405 Method Not Allowed", so you implement
-only the three you need. Inside a handler, ORM calls use the current request's
-database automatically. `Bookmark.find(request)` reads the `:id` route parameter and
-loads the row (or returns nil). `.flash(_:)` attaches a one-time message to the
-redirect, which we'll show next.
+`Controller` gives every action a default "405 Method Not Allowed", so you implement only the three you need. Inside a handler, ORM calls use the current request's database automatically (the [ambient database](../orm.md#the-ambient-database)). `Bookmark.find(request)` reads the `:id` route parameter and loads the row (or returns nil). `.flash(_:)` attaches a one-time message to the redirect, shown in the next step.
 
-## 5. Wire it up
+## 5. Wiring it up
 
-Routes live in `Sources/App/Routes.swift`. Open it and register the controller.
-`app.resources` maps the conventional RESTful routes to the controller's actions in
-one call:
+### Registering the routes
+
+Routes live in `Sources/App/Routes.swift`. Open it and register the controller. `app.resources` maps the conventional RESTful routes to the controller's actions in one call:
 
 ```swift
 import PlumeCore
@@ -242,14 +218,11 @@ func registerRoutes(_ app: Application) {
 }
 ```
 
-`resources("bookmarks", …)` wires `GET /bookmarks` → `index`, `POST /bookmarks` →
-`create` and `DELETE /bookmarks/:id` → `destroy` (plus `show`/`update` if you add
-them). Replace the starter `/`, `/hello` and `/count` demo routes with these two,
-and delete the now-unused `Views/HomePage.plume`. CSRF protection is already wired in
-`buildApp()` (`App.swift`), so there's nothing to add there.
+`resources("bookmarks", …)` wires `GET /bookmarks` → `index`, `POST /bookmarks` → `create` and `DELETE /bookmarks/:id` → `destroy` (plus `show`/`update` if you add them). Replace the starter `/`, `/hello` and `/count` demo routes with these two, and delete the now-unused `Views/HomePage.plume`. CSRF protection is already wired in `buildApp()` (`App.swift`), so there's nothing to add there.
 
-To show the "Bookmark added" flash, render it in the layout so every page picks it
-up. Edit `Views/Layout.plume`:
+### Showing the flash message
+
+To show the "Bookmark added" flash, render it in the layout so every page picks it up. Edit `Views/Layout.plume`:
 
 ```plume
 @component Layout(title: String, flash: String = "") {<!doctype html>
@@ -262,8 +235,7 @@ up. Edit `Views/Layout.plume`:
 </html>}
 ```
 
-Then forward the flash from the page. In `Views/BookmarksPage.plume`, add a `flash`
-parameter and pass it to `@Layout`:
+Then forward the flash from the page. In `Views/BookmarksPage.plume`, add a `flash` parameter and pass it to `@Layout`:
 
 ```plume
 @component BookmarksPage(bookmarks: [Bookmark], error: String = "", flash: String = "") {@Layout(title: "Bookmarks", flash: flash) {
@@ -275,31 +247,21 @@ and hand it in from `index`:
 return .view(bookmarksPage(bookmarks: bookmarks, flash: request.flash?.message ?? ""))
 ```
 
-## 6. Run it
+## 6. Running it
 
-`./plumekit dev` already rebuilt on each save. Open
-<http://127.0.0.1:8080/bookmarks>, add a bookmark with the form, and it appears in
-the list with a "Bookmark added" notice. Submit with an empty field and the form
-comes back with the error. Click × to delete. That's the full loop: a controller
-renders a Plume view, forms POST to actions, validation re-renders, and the ORM
-persists.
+`./plumekit dev` already rebuilt on each save. Open <http://127.0.0.1:8080/bookmarks>, add a bookmark with the form, and it appears in the list with a "Bookmark added" notice. Submit with an empty field and the form comes back with the error. Click × to delete.
 
-If a handler throws while you're developing, `dev` shows a full error page (the
-error, the request and your route table) instead of a bare 500. In production it's a
-clean 500.
+That's the full loop: a controller renders a Plume view, forms POST to actions, validation re-renders, and the ORM persists.
+
+> **Note:** If a handler throws while you're developing, `dev` shows a full error page (the error, the request and your route table) instead of a bare 500. In production it's a clean 500.
 
 ## Where to go next
 
 You've used the core of PlumeKit. From here:
 
-- **Validation rules**: declare them on the model so `save()` enforces them. See
-  [Validations](../validations.md).
-- **Pagination**: `Bookmark.query().paginate(page: 1, per: 20)` returns a `Page` with
-  `nextURL`/`previousURL` and totals. See the [ORM](../orm.md).
-- **Auth**: `plumekit generate auth` scaffolds registration, login and sessions. See
-  [Auth](../auth.md).
-- **Deploy it**: `./plumekit deploy` builds and ships to your configured target
-  (Cloudflare Worker, AWS Lambda or a container). See [Deploying](../deploying.md).
+- **Validation rules**: declare them on the model so `save()` enforces them. See [Validations](../validations.md).
+- **Pagination**: `Bookmark.query().paginate(page: 1, per: 20)` returns a `Page` with `nextURL`/`previousURL` and totals. See the [ORM](../orm.md).
+- **Auth**: `plumekit generate auth` scaffolds registration, login and sessions. See [Auth](../auth.md).
+- **Deploy it**: `./plumekit deploy` builds and ships to your configured target (Cloudflare Worker, AWS Lambda or a container). See [Deploying](../deploying.md).
 
-The same app you just built runs unchanged on the native server and on Cloudflare;
-see [Portability](../portability.md).
+The same app you just built runs unchanged on the native server and on Cloudflare; see [Portability](../portability.md).
