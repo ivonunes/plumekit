@@ -19,7 +19,13 @@ struct RegisteredRoute {
     let pattern: [PathSegment]
     let handler: Responder
     let bodyMode: RequestBodyMode
+    let file: StaticString
+    let line: UInt
 }
+
+/// A registered route as seen by tooling: method, path pattern and the source
+/// location of the call that registered it.
+public typealias RouteDescription = (method: String, path: String, file: String, line: UInt)
 
 /// The outcome of matching a request against the route table.
 public enum RouteMatch {
@@ -42,8 +48,8 @@ public struct Router {
 
     public init() {}
 
-    /// The registered routes as (method, path) pairs — for tooling (`plumekit routes`).
-    public var descriptions: [(method: String, path: String)] {
+    /// The registered routes with their registration sites — for tooling (`plumekit routes`).
+    public var descriptions: [RouteDescription] {
         routes.map { route in
             var path = ""
             for segment in route.pattern {
@@ -53,15 +59,19 @@ public struct Router {
                 case .wildcard(let name, let allowEmpty): path += "/" + (allowEmpty ? "**" : "*") + name
                 }
             }
-            return (route.method.name, path.isEmpty ? "/" : path)
+            let file = route.file.withUTF8Buffer { String(decoding: $0, as: UTF8.self) }
+            return (route.method.name, path.isEmpty ? "/" : path, file, route.line)
         }
     }
 
     /// Register `handler` for `method` at `path` (e.g. `/hello/:name`).
+    /// `file`/`line` record where the route was registered; the public registration
+    /// APIs default them to their own call site.
     public mutating func add(_ method: HTTPMethod, _ path: String, _ handler: @escaping Responder,
-                             bodyMode: RequestBodyMode = .buffered) {
+                             bodyMode: RequestBodyMode = .buffered,
+                             file: StaticString = #filePath, line: UInt = #line) {
         routes.append(RegisteredRoute(method: method, pattern: Router.parse(path),
-                                      handler: handler, bodyMode: bodyMode))
+                                      handler: handler, bodyMode: bodyMode, file: file, line: line))
     }
 
     /// Match a request path, distinguishing "no such path" (404) from "wrong

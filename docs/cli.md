@@ -22,7 +22,7 @@ Most commands take an optional `[path]` naming the project directory; it default
 | `plumekit console [path]` | Interactive REPL against the app. |
 | `plumekit migrate [path]` | Apply pending migrations. |
 | `plumekit seed [name] [path]` | Run the app's seeders, or just one. |
-| `plumekit routes [path]` | List the app's registered routes. |
+| `plumekit routes [path]` | List the app's registered routes, one per line as `METHOD`, path and `file:line` of the registration, tab-separated. |
 | `plumekit generate <kind> …` | Scaffold code or CI workflows (alias: `g`). |
 | `plumekit test [path]` | Run the app's test suite. |
 | `plumekit doctor` | Report the per-target toolchain state. |

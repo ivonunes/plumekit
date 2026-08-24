@@ -31,14 +31,15 @@ extension Controller {
 extension Application {
     /// Wire the conventional RESTful routes for a resource to a controller's
     /// actions. Unimplemented actions fall back to 405.
-    public func resources(_ path: String, _ controller: some Controller) {
-        get(path) { try await controller.index($0) }
-        get(path + "/new") { try await controller.new($0) }       // literal beats /:id via specificity
-        post(path) { try await controller.create($0) }
-        get(path + "/:id") { try await controller.show($0) }
-        get(path + "/:id/edit") { try await controller.edit($0) }
-        put(path + "/:id") { try await controller.update($0) }
-        patch(path + "/:id") { try await controller.update($0) }
-        delete(path + "/:id") { try await controller.destroy($0) }
+    public func resources(_ path: String, _ controller: some Controller,
+                          file: StaticString = #filePath, line: UInt = #line) {
+        get(path, file: file, line: line) { try await controller.index($0) }
+        get(path + "/new", file: file, line: line) { try await controller.new($0) }       // literal beats /:id via specificity
+        post(path, file: file, line: line) { try await controller.create($0) }
+        get(path + "/:id", file: file, line: line) { try await controller.show($0) }
+        get(path + "/:id/edit", file: file, line: line) { try await controller.edit($0) }
+        put(path + "/:id", file: file, line: line) { try await controller.update($0) }
+        patch(path + "/:id", file: file, line: line) { try await controller.update($0) }
+        delete(path + "/:id", file: file, line: line) { try await controller.destroy($0) }
     }
 }

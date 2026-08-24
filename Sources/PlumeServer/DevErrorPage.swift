@@ -9,7 +9,7 @@ import PlumeCore
 // Native-only by design: the embedded-Wasm guest can't stringify an arbitrary
 // `any Error` (no reflection), and production keeps the clean 500 regardless.
 enum DevErrorPage {
-    static func response(error: any Error, request: Request, routes: [(method: String, path: String)]) -> Response {
+    static func response(error: any Error, request: Request, routes: [RouteDescription]) -> Response {
         let errorType = escape(String(describing: type(of: error)))
         let message = escape(String(describing: error))
 

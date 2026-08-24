@@ -97,12 +97,19 @@ func fillParameters(_ template: String, _ values: [String]) -> String {
 
 extension Application {
     /// Register a handler on a named route: `app.get(PostRoutes.show) { … }`.
-    public func on(_ method: HTTPMethod, _ route: some RouteTemplate, _ handler: @escaping Responder) {
-        on(method, route.template, handler)
+    public func on(_ method: HTTPMethod, _ route: some RouteTemplate,
+                   file: StaticString = #filePath, line: UInt = #line,
+                   _ handler: @escaping Responder) {
+        on(method, route.template, file: file, line: line, handler)
     }
-    public func get(_ route: some RouteTemplate, _ handler: @escaping Responder) { on(.get, route, handler) }
-    public func post(_ route: some RouteTemplate, _ handler: @escaping Responder) { on(.post, route, handler) }
-    public func put(_ route: some RouteTemplate, _ handler: @escaping Responder) { on(.put, route, handler) }
-    public func patch(_ route: some RouteTemplate, _ handler: @escaping Responder) { on(.patch, route, handler) }
-    public func delete(_ route: some RouteTemplate, _ handler: @escaping Responder) { on(.delete, route, handler) }
+    public func get(_ route: some RouteTemplate, file: StaticString = #filePath, line: UInt = #line,
+                    _ handler: @escaping Responder) { on(.get, route, file: file, line: line, handler) }
+    public func post(_ route: some RouteTemplate, file: StaticString = #filePath, line: UInt = #line,
+                     _ handler: @escaping Responder) { on(.post, route, file: file, line: line, handler) }
+    public func put(_ route: some RouteTemplate, file: StaticString = #filePath, line: UInt = #line,
+                    _ handler: @escaping Responder) { on(.put, route, file: file, line: line, handler) }
+    public func patch(_ route: some RouteTemplate, file: StaticString = #filePath, line: UInt = #line,
+                      _ handler: @escaping Responder) { on(.patch, route, file: file, line: line, handler) }
+    public func delete(_ route: some RouteTemplate, file: StaticString = #filePath, line: UInt = #line,
+                       _ handler: @escaping Responder) { on(.delete, route, file: file, line: line, handler) }
 }

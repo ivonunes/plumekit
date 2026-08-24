@@ -17,29 +17,38 @@ public final class Application: @unchecked Sendable {
 
     public init() {}
 
-    /// The registered routes as (method, path) pairs — for tooling (`plumekit routes`).
-    public var routeList: [(method: String, path: String)] { router.descriptions }
+    /// The registered routes with their registration sites — for tooling (`plumekit routes`).
+    public var routeList: [RouteDescription] { router.descriptions }
 
     // MARK: - Route registration
 
     /// Register a handler for an arbitrary method. `body: .streaming` delivers the
     /// request body through `request.bodyReader` instead of buffering it (see
-    /// `RequestBodyMode`).
+    /// `RequestBodyMode`). `file`/`line` default to the call site and are reported
+    /// by `plumekit routes`.
     public func on(_ method: HTTPMethod, _ path: String, body: RequestBodyMode = .buffered,
+                   file: StaticString = #filePath, line: UInt = #line,
                    _ handler: @escaping Responder) {
-        router.add(method, path, handler, bodyMode: body)
+        router.add(method, path, handler, bodyMode: body, file: file, line: line)
     }
 
-    public func get(_ path: String, _ handler: @escaping Responder) { on(.get, path, handler) }
+    public func get(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                    _ handler: @escaping Responder) { on(.get, path, file: file, line: line, handler) }
     public func post(_ path: String, body: RequestBodyMode = .buffered,
-                     _ handler: @escaping Responder) { on(.post, path, body: body, handler) }
+                     file: StaticString = #filePath, line: UInt = #line,
+                     _ handler: @escaping Responder) { on(.post, path, body: body, file: file, line: line, handler) }
     public func put(_ path: String, body: RequestBodyMode = .buffered,
-                    _ handler: @escaping Responder) { on(.put, path, body: body, handler) }
+                    file: StaticString = #filePath, line: UInt = #line,
+                    _ handler: @escaping Responder) { on(.put, path, body: body, file: file, line: line, handler) }
     public func patch(_ path: String, body: RequestBodyMode = .buffered,
-                      _ handler: @escaping Responder) { on(.patch, path, body: body, handler) }
-    public func delete(_ path: String, _ handler: @escaping Responder) { on(.delete, path, handler) }
-    public func head(_ path: String, _ handler: @escaping Responder) { on(.head, path, handler) }
-    public func options(_ path: String, _ handler: @escaping Responder) { on(.options, path, handler) }
+                      file: StaticString = #filePath, line: UInt = #line,
+                      _ handler: @escaping Responder) { on(.patch, path, body: body, file: file, line: line, handler) }
+    public func delete(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                       _ handler: @escaping Responder) { on(.delete, path, file: file, line: line, handler) }
+    public func head(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                     _ handler: @escaping Responder) { on(.head, path, file: file, line: line, handler) }
+    public func options(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                        _ handler: @escaping Responder) { on(.options, path, file: file, line: line, handler) }
 
     /// The registered body mode for a request, so a streaming-capable adapter can
     /// decide BEFORE buffering whether to deliver live chunks. Unmatched requests

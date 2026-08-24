@@ -248,3 +248,20 @@ private struct PhotosController: Controller {
     #expect(await app.handle(request(.post, "/photos")).status == 405)
     #expect(await app.handle(request(.delete, "/photos/42")).status == 405)
 }
+
+@Test func routeListRecordsRegistrationSite() {
+    let app = Application()
+    let line = #line + 1
+    app.get("/hello/:name") { _ in .text("hi") }
+    app.group("/admin") { admin in
+        admin.post("/users") { _ in .text("ok") }
+    }
+
+    let routes = app.routeList
+    #expect(routes.map(\.method) == ["GET", "POST"])
+    #expect(routes.map(\.path) == ["/hello/:name", "/admin/users"])
+    #expect(routes[0].file == #filePath)
+    #expect(routes[0].line == UInt(line))
+    #expect(routes[1].file == #filePath)
+    #expect(routes[1].line == UInt(line + 2))
+}

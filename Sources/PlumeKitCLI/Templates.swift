@@ -415,7 +415,7 @@ let arguments = CommandLine.arguments
 
 // `--routes`: print the app's registered routes and exit (bindings not needed).
 if arguments.contains("--routes") {
-    for route in buildApp().routeList { print("\(route.method)\t\(route.path)") }
+    for route in buildApp().routeList { print("\(route.method)\t\(route.path)\t\(route.file):\(route.line)") }
     exit(0)
 }
 

@@ -19,7 +19,8 @@ import PlumeCore
     @Test func rendersErrorTypeMessageAndRequest() {
         let response = DevErrorPage.response(
             error: SampleError(), request: makeRequest(),
-            routes: [(method: "GET", path: "/posts"), (method: "POST", path: "/posts")])
+            routes: [(method: "GET", path: "/posts", file: "Routes.swift", line: 1),
+                     (method: "POST", path: "/posts", file: "Routes.swift", line: 2)])
         let html = String(decoding: response.body, as: UTF8.self)
 
         #expect(response.status == 500)

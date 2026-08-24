@@ -36,18 +36,27 @@ public final class RouteGroup {
     }
 
     /// Register a handler for an arbitrary method within this group.
-    public func on(_ method: HTTPMethod, _ path: String, _ handler: @escaping Responder) {
+    public func on(_ method: HTTPMethod, _ path: String,
+                   file: StaticString = #filePath, line: UInt = #line,
+                   _ handler: @escaping Responder) {
         let chain = ScopedChain(middleware: middleware, handler: handler)
-        app.on(method, prefix + path) { try await chain.run($0) }
+        app.on(method, prefix + path, file: file, line: line) { try await chain.run($0) }
     }
 
-    public func get(_ path: String, _ handler: @escaping Responder) { on(.get, path, handler) }
-    public func post(_ path: String, _ handler: @escaping Responder) { on(.post, path, handler) }
-    public func put(_ path: String, _ handler: @escaping Responder) { on(.put, path, handler) }
-    public func patch(_ path: String, _ handler: @escaping Responder) { on(.patch, path, handler) }
-    public func delete(_ path: String, _ handler: @escaping Responder) { on(.delete, path, handler) }
-    public func head(_ path: String, _ handler: @escaping Responder) { on(.head, path, handler) }
-    public func options(_ path: String, _ handler: @escaping Responder) { on(.options, path, handler) }
+    public func get(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                    _ handler: @escaping Responder) { on(.get, path, file: file, line: line, handler) }
+    public func post(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                     _ handler: @escaping Responder) { on(.post, path, file: file, line: line, handler) }
+    public func put(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                    _ handler: @escaping Responder) { on(.put, path, file: file, line: line, handler) }
+    public func patch(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                      _ handler: @escaping Responder) { on(.patch, path, file: file, line: line, handler) }
+    public func delete(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                       _ handler: @escaping Responder) { on(.delete, path, file: file, line: line, handler) }
+    public func head(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                     _ handler: @escaping Responder) { on(.head, path, file: file, line: line, handler) }
+    public func options(_ path: String, file: StaticString = #filePath, line: UInt = #line,
+                        _ handler: @escaping Responder) { on(.options, path, file: file, line: line, handler) }
 
     /// A nested group: the prefix and middleware compose with this group's.
     public func group(_ prefix: String = "",
@@ -57,15 +66,16 @@ public final class RouteGroup {
     }
 
     /// Wire a controller's conventional RESTful routes within this group.
-    public func resources(_ path: String, _ controller: some Controller) {
-        get(path) { try await controller.index($0) }
-        get(path + "/new") { try await controller.new($0) }       // literal beats /:id via specificity
-        post(path) { try await controller.create($0) }
-        get(path + "/:id") { try await controller.show($0) }
-        get(path + "/:id/edit") { try await controller.edit($0) }
-        put(path + "/:id") { try await controller.update($0) }
-        patch(path + "/:id") { try await controller.update($0) }
-        delete(path + "/:id") { try await controller.destroy($0) }
+    public func resources(_ path: String, _ controller: some Controller,
+                          file: StaticString = #filePath, line: UInt = #line) {
+        get(path, file: file, line: line) { try await controller.index($0) }
+        get(path + "/new", file: file, line: line) { try await controller.new($0) }       // literal beats /:id via specificity
+        post(path, file: file, line: line) { try await controller.create($0) }
+        get(path + "/:id", file: file, line: line) { try await controller.show($0) }
+        get(path + "/:id/edit", file: file, line: line) { try await controller.edit($0) }
+        put(path + "/:id", file: file, line: line) { try await controller.update($0) }
+        patch(path + "/:id", file: file, line: line) { try await controller.update($0) }
+        delete(path + "/:id", file: file, line: line) { try await controller.destroy($0) }
     }
 }
 
