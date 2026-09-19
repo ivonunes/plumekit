@@ -65,7 +65,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-crypto.git", from: "4.5.1"),
         // swift-syntax — powers the @Model macro (host compiler plugin only; its
         // OUTPUT is plain Embedded-clean Swift). 603.x matches Swift 6.3.
-        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0"),
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
     ],
     targets: [
         // ── Templating (the Plume language) ──────────────────────────────────
